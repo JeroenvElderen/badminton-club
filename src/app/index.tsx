@@ -1,909 +1,808 @@
-
-import { useState } from 'react';
+import LeaderboardPage from '@/components/leaderboard-page';
+import MatchesPage from '@/components/matches-page';
+import MorePage from '@/components/more-page';
+import StatsPage from '@/components/stats-page';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { useState } from 'react';
 import {
-  Alert,
+  Image,
+  Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
-  View,
+  View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
 type Attendance = 'going' | 'maybe' | 'not-going';
+type Tab = 'Home' | 'Matches' | 'Stats' | 'Leaderboard' | 'More';
 
-type Court = {
-  number: number;
-  type: 'Doubles' | 'Singles' | 'Available';
-  players: string[];
-  active: boolean;
-};
-
-const C = {
-  background: '#081B18',
-  surface: '#102C27',
-  surfaceRaised: '#173C34',
-  border: '#254B40',
-  emerald: '#35D6A0',
-  emeraldDark: '#174E3E',
+const P = {
+  bg: '#031B16',
+  card: '#06251E',
+  tile: '#102C27',
+  border: '#185243',
+  green: '#00D995',
+  mint: '#78DCC0',
   white: '#F6FBF8',
-  muted: '#93AAA3',
-  purple: '#9B83E8',
-  amber: '#F1C47B',
+  muted: '#A6B8B1',
+  purple: '#8250D0',
+  blue: '#55B6F7',
+  orange: '#F5A44D',
 };
 
-const courts: Court[] = [
-  {
-    number: 1,
-    type: 'Doubles',
-    players: ['Sarah', 'James', 'Emma', 'Chris'],
-    active: true,
-  },
-  {
-    number: 2,
-    type: 'Doubles',
-    players: ['Alex', 'Priya', 'Mark', 'Daniel'],
-    active: true,
-  },
-  {
-    number: 3,
-    type: 'Doubles',
-    players: ['Lisa', 'Tom', 'Maya', 'Ben'],
-    active: true,
-  },
-  {
-    number: 4,
-    type: 'Singles',
-    players: ['Oliver', 'Sophie'],
-    active: true,
-  },
+const PHOTO = {
+  hero: require('../../assets/images/shuttleheader.png'),
+  alex: 'https://i.pravatar.cc/150?img=12',
+  priya: 'https://i.pravatar.cc/150?img=47',
+  mark: 'https://i.pravatar.cc/150?img=13',
+  daniel: 'https://i.pravatar.cc/150?img=11',
+};
+
+const COURTS = [
+  { id: 1, kind: 'Doubles', a: 'Sarah & James', b: 'Emma & Chris' },
+  { id: 2, kind: 'Doubles', a: 'Alex & Priya', b: 'Mark & Daniel' },
+  { id: 3, kind: 'Doubles', a: 'Lisa & Tom', b: 'Maya & Ben' },
+  { id: 4, kind: 'Singles', a: 'Oliver', b: 'Sophie' },
 ];
 
-function SectionHeading({
-  title,
-  action,
-  onAction,
+const NAV: { label: Tab; icon: IconName; selected: IconName }[] = [
+  { label: 'Home', icon: 'home-outline', selected: 'home' },
+  { label: 'Matches', icon: 'tennisball-outline', selected: 'tennisball' },
+  { label: 'Stats', icon: 'stats-chart-outline', selected: 'stats-chart' },
+  { label: 'Leaderboard', icon: 'trophy-outline', selected: 'trophy' },
+  { label: 'More', icon: 'menu-outline', selected: 'menu' },
+];
+
+function I({
+  name,
+  size = 20,
+  color = P.white,
 }: {
-  title: string;
-  action?: string;
-  onAction?: () => void;
+  name: IconName;
+  size?: number;
+  color?: string;
+}) {
+  return <Ionicons name={name} size={size} color={color} />;
+}
+
+// Small custom shuttlecock mark. No extra image dependency.
+function Shuttlecock({ size = 32, color = P.white }: {
+  size?: number;
+  color?: string;
 }) {
   return (
-    <View style={styles.sectionHeading}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {action && (
-        <Pressable onPress={onAction}>
-          <Text style={styles.sectionAction}>{action} →</Text>
-        </Pressable>
-      )}
+    <View style={{ width: size, height: size, justifyContent: 'center' }}>
+      <Text
+        style={{
+          color,
+          fontSize: size * 0.78,
+          lineHeight: size,
+          textAlign: 'center',
+        }}
+      >
+        🏸
+      </Text>
     </View>
   );
 }
 
-function AttendanceButton({
+function Avatar({ url, size = 38 }: { url: string; size?: number }) {
+  return (
+    <Image
+      source={{ uri: url }}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        borderWidth: 2,
+        borderColor: '#D9E6E1',
+        backgroundColor: P.tile,
+      }}
+    />
+  );
+}
+
+function Panel({ children, style }: {
+  children: React.ReactNode;
+  style?: object;
+}) {
+  return <View style={[s.panel, style]}>{children}</View>;
+}
+
+function CircleIcon({
+  name,
+  size = 45,
+}: {
+  name: IconName;
+  size?: number;
+}) {
+  return (
+    <View style={[s.circleIcon, { width: size, height: size, borderRadius: size / 2 }]}>
+      <I name={name} size={size * 0.52} />
+    </View>
+  );
+}
+
+function Pair({
+  first,
+  second,
   label,
-  selected,
+}: {
+  first: string;
+  second: string;
+  label: string;
+}) {
+  return (
+    <View style={s.pair}>
+      <View style={s.pairPhotos}>
+        <Avatar url={first} size={41} />
+        <View style={{ marginLeft: -10 }}>
+          <Avatar url={second} size={41} />
+        </View>
+      </View>
+      <Text style={s.pairLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function MatchTeams() {
+  return (
+    <View style={s.teams}>
+      <Pair first={PHOTO.alex} second={PHOTO.priya} label="You & Priya" />
+      <Text style={s.versus}>VS</Text>
+      <Pair first={PHOTO.mark} second={PHOTO.daniel} label="Mark & Daniel" />
+    </View>
+  );
+}
+
+function Stat({
+  icon,
+  color,
+  number,
+  label,
+}: {
+  icon: IconName;
+  color: string;
+  number: string;
+  label: string;
+}) {
+  return (
+    <View style={s.stat}>
+      <I name={icon} color={color} size={23} />
+      <Text style={s.statNumber}>{number}</Text>
+      <Text style={s.statLabel} numberOfLines={1}>{label}</Text>
+    </View>
+  );
+}
+
+function Action({
+  icon,
+  label,
   onPress,
 }: {
+  icon: IconName;
   label: string;
-  selected: boolean;
   onPress: () => void;
 }) {
   return (
-    <Pressable
-      onPress={onPress}
-      style={[
-        styles.attendanceButton,
-        selected && styles.attendanceSelected,
-      ]}
-    >
-      <Text
-        style={[
-          styles.attendanceText,
-          selected && styles.attendanceTextSelected,
-        ]}
-      >
-        {label}
-      </Text>
+    <Pressable style={({ pressed }) => [s.action, pressed && s.pressed]} onPress={onPress}>
+      <I name={icon} size={25} color={P.green} />
+      <Text style={s.actionLabel} numberOfLines={2}>{label}</Text>
     </Pressable>
   );
 }
 
-function CourtCard({ court }: { court: Court }) {
+function Home({
+  attendance,
+  changeAttendance,
+  go,
+}: {
+  attendance: Attendance;
+  changeAttendance: () => void;
+  go: (tab: Tab) => void;
+}) {
+  const [courtsOpen, setCourtsOpen] = useState(false);
+
+  const attendingTitle =
+    attendance === 'going' ? "You're Attending" :
+      attendance === 'maybe' ? 'Maybe Attending' : 'Not Attending';
+
   return (
-    <View style={styles.courtCard}>
-      <View style={styles.courtTop}>
-        <Text style={styles.courtNumber}>
-          COURT {court.number}
-        </Text>
-        <View style={styles.liveIndicator}>
-          <View style={styles.liveDot} />
-          <Text style={styles.liveText}>
-            {court.active ? 'IN PLAY' : 'FREE'}
+    <ScrollView
+      style={s.scroll}
+      contentContainerStyle={s.scrollContent}
+      showsVerticalScrollIndicator={false}
+    >
+
+      <View style={s.hero}>
+        <Image
+          source={PHOTO.hero}
+          resizeMode="cover"
+          style={s.positionedHeroImage}
+        />
+
+        <View
+          pointerEvents="none"
+          style={s.heroColorTint}
+        />
+
+
+
+
+        <LinearGradient
+          colors={[
+            'rgba(3, 27, 22, 0.48)',
+            'rgba(3, 27, 22, 0.12)',
+            'rgba(3, 27, 22, 0.18)',
+            'rgba(3, 27, 22, 0.58)',
+            'rgba(3, 27, 22, 0.88)',
+            P.bg,
+          ]}
+          locations={[0, 0.20, 0.40, 0.62, 0.82, 1]}
+          style={s.heroOverlay}
+        >
+
+
+          <View style={s.topBar}>
+            <View style={s.brand}>
+              <Shuttlecock size={36} color={P.white} />
+
+              <View>
+                <Text style={s.brandName}>Riverside</Text>
+                <Text style={s.brandName}>Badminton Club</Text>
+              </View>
+            </View>
+
+            <View style={s.headerRight}>
+              <Pressable
+                style={s.notification}
+                onPress={() => go('More')}
+              >
+                <I
+                  name="notifications-outline"
+                  size={24}
+                  color={P.white}
+                />
+                <View style={s.redDot} />
+              </Pressable>
+
+              <Pressable onPress={() => go('More')}>
+                <Avatar url={PHOTO.alex} size={43} />
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={s.greeting}>
+            <Text style={s.hello}>
+              Hi <Text style={s.name}>Alex!</Text>
+            </Text>
+
+            <Text style={s.subHello}>
+              Ready for tonight?
+            </Text>
+          </View>
+        </LinearGradient>
+      </View>
+
+
+      <View style={s.sections}>
+        <Panel>
+          <View style={s.attendanceRow}>
+            <CircleIcon name="calendar" size={49} />
+            <View style={s.attendanceText}>
+              <Text style={s.attendanceTitle}>{attendingTitle}</Text>
+              <Text style={s.attendanceEvent}>Club Night</Text>
+              <Text style={s.secondary}>Tuesday · 19:00–21:00</Text>
+            </View>
+            <View style={[
+              s.confirmCircle,
+              attendance === 'maybe' && { backgroundColor: P.orange },
+              attendance === 'not-going' && { backgroundColor: '#61746D' },
+            ]}>
+              <I
+                name={attendance === 'going' ? 'checkmark' :
+                  attendance === 'maybe' ? 'help' : 'close'}
+                size={27}
+              />
+            </View>
+          </View>
+          <Pressable style={s.attendanceButton} onPress={changeAttendance}>
+            <Text style={s.buttonText}>Change Attendance</Text>
+            <I name="chevron-forward" size={21} />
+          </Pressable>
+        </Panel>
+
+        <Panel>
+          <View style={s.matchHeader}>
+            <CircleIcon name="tennisball-outline" size={46} />
+            <View style={s.matchHeaderText}>
+              <Text style={s.matchTitle}>Next Match</Text>
+              <Text style={s.matchMeta}>Round 3 · Court 2</Text>
+              <Text style={s.secondary}>Upcoming match</Text>
+            </View>
+            <View style={s.badge}>
+              <Text style={s.badgeText}>Doubles</Text>
+            </View>
+          </View>
+          <MatchTeams />
+          <Pressable style={s.primaryButton} onPress={() => go('Matches')}>
+            <Text style={s.buttonText}>View Match</Text>
+            <I name="chevron-forward" size={21} />
+          </Pressable>
+        </Panel>
+
+        <Panel style={s.overview}>
+          <View style={s.sectionHeading}>
+            <Text style={s.sectionTitle}>Tonight's Overview</Text>
+            <Pressable style={s.viewAll} onPress={() => setCourtsOpen(!courtsOpen)}>
+              <Text style={s.viewAllText}>{courtsOpen ? 'Hide' : 'View All'}</Text>
+              <I name="chevron-forward" size={17} color={P.green} />
+            </Pressable>
+          </View>
+          <View style={s.stats}>
+            <Stat icon="people-outline" color={P.green} number="14" label="Attending" />
+            <Stat icon="grid-outline" color={P.blue} number="4" label="Courts" />
+            <Stat icon="tennisball-outline" color={P.purple} number="3" label="Round" />
+            <Stat icon="cafe-outline" color={P.orange} number="0" label="Resting" />
+          </View>
+          {courtsOpen && (
+            <View style={s.courtList}>
+              {COURTS.map(court => (
+                <View key={court.id} style={s.courtItem}>
+                  <View style={s.courtNumber}>
+                    <Text style={s.courtNumberText}>{court.id}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.courtHeading}>Court {court.id} · {court.kind}</Text>
+                    <Text style={s.courtDetail}>{court.a} vs {court.b}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </Panel>
+
+        <View style={s.quickPanel}>
+          <Text style={s.sectionTitle}>Quick Actions</Text>
+          <View style={s.actions}>
+            <Action icon="calendar-outline" label="My Matches" onPress={() => go('Matches')} />
+            <Action icon="bar-chart-outline" label="Live Scores" onPress={() => go('Matches')} />
+            <Action icon="stats-chart-outline" label="My Statistics" onPress={() => go('Stats')} />
+            <Action icon="trophy-outline" label="Leaderboard" onPress={() => go('Leaderboard')} />
+          </View>
+        </View>
+        <Text style={s.demo}>DEMONSTRATION DATA · DATABASE CONNECTION PENDING</Text>
+      </View>
+    </ScrollView>
+  );
+}
+
+function OtherPage({ tab, go }: {
+  tab: Tab;
+  go: (tab: Tab) => void;
+}) {
+  return (
+    <ScrollView contentContainerStyle={s.otherPage}>
+      <View style={s.otherTop}>
+        <Pressable onPress={() => go('Home')}>
+          <I name="arrow-back" size={24} />
+        </Pressable>
+        <Text style={s.otherTitle}>{tab}</Text>
+      </View>
+
+      <Panel>
+        {tab === 'Matches' ? (
+          <>
+            <Text style={s.eyebrow}>ROUND 3 · COURT 2</Text>
+            <Text style={s.detailTitle}>Your Next Match</Text>
+            <Text style={s.secondary}>Doubles</Text>
+            <MatchTeams />
+            <Text style={s.description}>
+              Match scoring and history will be connected to the club database.
+            </Text>
+          </>
+        ) : tab === 'Stats' ? (
+          <>
+            <Text style={s.detailTitle}>My Statistics</Text>
+            <View style={[s.stats, { marginTop: 20 }]}>
+              <Stat icon="tennisball-outline" color={P.green} number="24" label="Matches" />
+              <Stat icon="trophy-outline" color={P.blue} number="16" label="Wins" />
+              <Stat icon="analytics-outline" color={P.purple} number="67%" label="Win Rate" />
+            </View>
+            <Text style={s.description}>Demonstration statistics.</Text>
+          </>
+        ) : tab === 'Leaderboard' ? (
+          <>
+            <Text style={s.detailTitle}>Club Leaderboard</Text>
+            <Text style={s.description}>
+              Rankings will be calculated from verified match results and skill ratings.
+            </Text>
+          </>
+        ) : (
+          <>
+            <View style={s.profile}>
+              <Avatar url={PHOTO.alex} size={56} />
+              <View>
+                <Text style={s.detailTitle}>Alex</Text>
+                <Text style={s.secondary}>Club Player</Text>
+              </View>
+            </View>
+            {['My Profile', 'Club Members', 'Club Sessions', 'Settings', 'Admin Dashboard'].map(item => (
+              <View key={item} style={s.menuRow}>
+                <Text style={s.menuText}>{item}</Text>
+                <I name="chevron-forward" color={P.muted} />
+              </View>
+            ))}
+            <Text style={s.description}>
+              These sections will be enabled in their respective modules.
+            </Text>
+          </>
+        )}
+      </Panel>
+    </ScrollView>
+  );
+}
+
+function AttendancePicker({
+  visible,
+  value,
+  choose,
+  close,
+}: {
+  visible: boolean;
+  value: Attendance;
+  choose: (value: Attendance) => void;
+  close: () => void;
+}) {
+  const choices: { value: Attendance; label: string; icon: IconName }[] = [
+    { value: 'going', label: 'Going', icon: 'checkmark-circle-outline' },
+    { value: 'maybe', label: 'Maybe', icon: 'help-circle-outline' },
+    { value: 'not-going', label: 'Not Going', icon: 'close-circle-outline' },
+  ];
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={close}>
+      <View style={s.modalBackground}>
+        <View style={s.modal}>
+          <View style={s.modalTop}>
+            <Text style={s.detailTitle}>Change Attendance</Text>
+            <Pressable onPress={close}><I name="close" size={23} /></Pressable>
+          </View>
+          <Text style={s.secondary}>Club Night · Tuesday 19:00–21:00</Text>
+          {choices.map(item => (
+            <Pressable
+              key={item.value}
+              style={[s.choice, value === item.value && s.choiceSelected]}
+              onPress={() => { choose(item.value); close(); }}
+            >
+              <I name={item.icon} color={value === item.value ? P.green : P.muted} />
+              <Text style={s.choiceText}>{item.label}</Text>
+              {value === item.value && <I name="checkmark" color={P.green} />}
+            </Pressable>
+          ))}
+          <Text style={s.modalFootnote}>
+            This selection is temporary until database attendance is implemented.
           </Text>
         </View>
       </View>
-
-      <Text style={styles.courtType}>{court.type}</Text>
-
-      <View style={styles.courtDivider} />
-
-      {court.players.length === 4 ? (
-        <>
-          <Text style={styles.courtPlayers}>
-            {court.players[0]} & {court.players[1]}
-          </Text>
-          <Text style={styles.versus}>vs</Text>
-          <Text style={styles.courtPlayers}>
-            {court.players[2]} & {court.players[3]}
-          </Text>
-        </>
-      ) : court.players.length === 2 ? (
-        <>
-          <Text style={styles.courtPlayers}>
-            {court.players[0]}
-          </Text>
-          <Text style={styles.versus}>vs</Text>
-          <Text style={styles.courtPlayers}>
-            {court.players[1]}
-          </Text>
-        </>
-      ) : (
-        <Text style={styles.courtPlayers}>Court available</Text>
-      )}
-    </View>
+    </Modal>
   );
 }
 
-function StatCard({
-  value,
-  label,
-  accent,
-}: {
-  value: string;
-  label: string;
-  accent?: string;
-}) {
-  return (
-    <View style={styles.statCard}>
-      <Text style={[styles.statValue, accent ? { color: accent } : null]}>
-        {value}
-      </Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function QuickAction({
-  icon,
-  title,
-  subtitle,
-  onPress,
-}: {
-  icon: string;
-  title: string;
-  subtitle: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable style={styles.quickAction} onPress={onPress}>
-      <View style={styles.quickIcon}>
-        <Text style={styles.quickIconText}>{icon}</Text>
-      </View>
-      <View style={styles.quickText}>
-        <Text style={styles.quickTitle}>{title}</Text>
-        <Text style={styles.quickSubtitle}>{subtitle}</Text>
-      </View>
-      <Text style={styles.chevron}>›</Text>
-    </Pressable>
-  );
-}
-
-export default function PlayerHomeScreen() {
+export default function RiversideApp() {
+  const [tab, setTab] = useState<Tab>('Home');
   const [attendance, setAttendance] = useState<Attendance>('going');
-
-  const showComingSoon = (feature: string) => {
-    Alert.alert(
-      feature,
-      'This feature will be connected in a future module.',
-    );
-  };
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
       <StatusBar barStyle="light-content" />
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* HEADER */}
-        <View style={styles.header}>
-          <View style={styles.brandRow}>
-            <View style={styles.brandIcon}>
-              <Text style={styles.brandEmoji}>🏸</Text>
-            </View>
-            <View style={styles.brandText}>
-              <Text style={styles.brandTitle}>BADMINTON CLUB</Text>
-              <Text style={styles.brandSubtitle}>PLAYER DASHBOARD</Text>
-            </View>
-          </View>
+      <View style={s.content}>
+        {tab === 'Home' ? (
+          <Home
+            attendance={attendance}
+            changeAttendance={() => setPickerOpen(true)}
+            go={setTab}
+          />
+        ) : tab === 'Matches' ? (
+          <MatchesPage />
+        ) : tab === 'Stats' ? (
+          <StatsPage />
+        ) : tab === 'Leaderboard' ? ( 
+          <LeaderboardPage />
+        ) : tab === 'More' ? ( 
+          <MorePage />
+        ) : (
+          <OtherPage tab={tab} go={setTab} />
+        )}
+      </View>
 
-          <Pressable
-            style={styles.avatar}
-            onPress={() => showComingSoon('Player Profile')}
-          >
-            <Text style={styles.avatarText}>A</Text>
-          </Pressable>
-        </View>
-
-        {/* GREETING */}
-        <View style={styles.greeting}>
-          <Text style={styles.greetingSmall}>WELCOME BACK</Text>
-          <Text style={styles.greetingTitle}>Good evening, Alex 👋</Text>
-          <Text style={styles.greetingDescription}>
-            Ready for another great night on court?
-          </Text>
-        </View>
-
-        {/* ATTENDANCE */}
-        <View style={styles.attendanceCard}>
-          <View style={styles.cardTopRow}>
-            <View>
-              <Text style={styles.eyebrow}>UPCOMING CLUB NIGHT</Text>
-              <Text style={styles.clubNightTitle}>Tuesday Session</Text>
-              <Text style={styles.clubNightDate}>
-                Tuesday · 7:00 PM – 9:00 PM
+      <View style={s.navigation}>
+        {NAV.map(item => {
+          const active = tab === item.label;
+          return (
+            <Pressable
+              key={item.label}
+              onPress={() => setTab(item.label)}
+              style={s.navButton}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+            >
+              {active && <View style={s.navLine} />}
+              <I
+                name={active ? item.selected : item.icon}
+                size={23}
+                color={active ? P.green : '#B7C6BF'}
+              />
+              <Text style={[s.navText, active && { color: P.green }]}>
+                {item.label}
               </Text>
-            </View>
-            <View style={styles.calendarIcon}>
-              <Text style={styles.calendarEmoji}>📅</Text>
-            </View>
-          </View>
+            </Pressable>
+          );
+        })}
+      </View>
 
-          <View style={styles.attendanceDivider} />
-
-          <Text style={styles.attendanceQuestion}>
-            Will you be attending?
-          </Text>
-
-          <View style={styles.attendanceRow}>
-            <AttendanceButton
-              label="✓ Going"
-              selected={attendance === 'going'}
-              onPress={() => setAttendance('going')}
-            />
-            <AttendanceButton
-              label="Maybe"
-              selected={attendance === 'maybe'}
-              onPress={() => setAttendance('maybe')}
-            />
-            <AttendanceButton
-              label="Not Going"
-              selected={attendance === 'not-going'}
-              onPress={() => setAttendance('not-going')}
-            />
-          </View>
-
-          <View style={styles.attendanceFooter}>
-            <View style={styles.smallDot} />
-            <Text style={styles.attendanceFooterText}>
-              {attendance === 'going'
-                ? "You're marked as attending"
-                : attendance === 'maybe'
-                  ? "You're marked as maybe attending"
-                  : "You're marked as not attending"}
-            </Text>
-          </View>
-        </View>
-
-        {/* NEXT MATCH */}
-        <SectionHeading
-          title="Your Next Match"
-          action="Match details"
-          onAction={() => showComingSoon('Match Details')}
-        />
-
-        <View style={styles.matchCard}>
-          <View style={styles.matchTop}>
-            <View style={styles.matchBadge}>
-              <Text style={styles.matchBadgeText}>DOUBLES</Text>
-            </View>
-            <Text style={styles.matchRound}>ROUND 3</Text>
-          </View>
-
-          <View style={styles.matchTeams}>
-            <View style={styles.team}>
-              <View style={styles.teamAvatar}>
-                <Text style={styles.teamAvatarText}>A</Text>
-              </View>
-              <Text style={styles.teamNames}>Alex & Priya</Text>
-              <Text style={styles.teamLabel}>YOUR TEAM</Text>
-            </View>
-
-            <View style={styles.vsCircle}>
-              <Text style={styles.vsText}>VS</Text>
-            </View>
-
-            <View style={styles.team}>
-              <View style={[styles.teamAvatar, styles.opponentAvatar]}>
-                <Text style={styles.teamAvatarText}>M</Text>
-              </View>
-              <Text style={styles.teamNames}>Mark & Daniel</Text>
-              <Text style={styles.teamLabel}>OPPONENTS</Text>
-            </View>
-          </View>
-
-          <View style={styles.matchFooter}>
-            <Text style={styles.matchFooterText}>
-              🏸 Court 2
-            </Text>
-            <Text style={styles.matchFooterText}>
-              ⏱ Up next
-            </Text>
-          </View>
-        </View>
-
-        {/* COURTS */}
-        <SectionHeading
-          title="Court Overview"
-          action="View all"
-          onAction={() => showComingSoon('Court Overview')}
-        />
-
-        <View style={styles.courtsGrid}>
-          {courts.map((court) => (
-            <CourtCard key={court.number} court={court} />
-          ))}
-        </View>
-
-        {/* SESSION OVERVIEW */}
-        <SectionHeading title="Tonight at a Glance" />
-
-        <View style={styles.statsRow}>
-          <StatCard value="14" label="Players" />
-          <StatCard value="4" label="Courts" accent={C.emerald} />
-          <StatCard value="3" label="Round" />
-          <StatCard value="0" label="Resting" accent={C.purple} />
-        </View>
-
-        {/* PERSONAL STATS */}
-        <SectionHeading
-          title="Your Performance"
-          action="Statistics"
-          onAction={() => showComingSoon('Statistics')}
-        />
-
-        <View style={styles.performanceCard}>
-          <View style={styles.performanceStat}>
-            <Text style={styles.performanceValue}>24</Text>
-            <Text style={styles.performanceLabel}>Matches</Text>
-          </View>
-          <View style={styles.performanceDivider} />
-          <View style={styles.performanceStat}>
-            <Text style={styles.performanceValue}>16</Text>
-            <Text style={styles.performanceLabel}>Wins</Text>
-          </View>
-          <View style={styles.performanceDivider} />
-          <View style={styles.performanceStat}>
-            <Text style={[styles.performanceValue, { color: C.emerald }]}>
-              67%
-            </Text>
-            <Text style={styles.performanceLabel}>Win Rate</Text>
-          </View>
-        </View>
-
-        {/* QUICK ACTIONS */}
-        <SectionHeading title="Quick Actions" />
-
-        <View style={styles.quickActionsCard}>
-          <QuickAction
-            icon="🏆"
-            title="Club Rankings"
-            subtitle="See the player leaderboard"
-            onPress={() => showComingSoon('Club Rankings')}
-          />
-          <View style={styles.quickDivider} />
-          <QuickAction
-            icon="📊"
-            title="Match History"
-            subtitle="Review your previous games"
-            onPress={() => showComingSoon('Match History')}
-          />
-          <View style={styles.quickDivider} />
-          <QuickAction
-            icon="👥"
-            title="Club Members"
-            subtitle="Explore the player directory"
-            onPress={() => showComingSoon('Club Members')}
-          />
-        </View>
-
-        <Text style={styles.bottomNote}>
-          BADMINTON CLUB · PLAYER EXPERIENCE
-        </Text>
-      </ScrollView>
+      <AttendancePicker
+        visible={pickerOpen}
+        value={attendance}
+        choose={setAttendance}
+        close={() => setPickerOpen(false)}
+      />
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: C.background,
+const s = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: P.bg },
+  content: { flex: 1 },
+  scroll: { flex: 1 },
+  scrollContent: { paddingBottom: 20 },
+  heroColorTint: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 42, 32, 0.14)',
   },
-  scroll: {
-    flex: 1,
-  },
-  content: {
-    paddingHorizontal: 20,
-    paddingBottom: 50,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 18,
-    paddingBottom: 18,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
-  },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  brandIcon: {
-    width: 43,
-    height: 43,
-    backgroundColor: C.emeraldDark,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  brandEmoji: {
-    fontSize: 22,
-  },
-  brandText: {
-    justifyContent: 'center',
-  },
-  brandTitle: {
-    color: C.white,
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 1.4,
-  },
-  brandSubtitle: {
-    color: C.emerald,
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 2,
-    marginTop: 4,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: C.purple,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    color: C.white,
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  greeting: {
-    paddingTop: 30,
-    paddingBottom: 25,
-  },
-  greetingSmall: {
-    color: C.emerald,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 2.5,
-  },
-  greetingTitle: {
-    color: C.white,
-    fontSize: 27,
-    fontWeight: '800',
-    marginTop: 10,
-  },
-  greetingDescription: {
-    color: C.muted,
-    fontSize: 14,
-    marginTop: 9,
-  },
-  attendanceCard: {
-    backgroundColor: C.surfaceRaised,
-    borderRadius: 22,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: C.border,
-    marginBottom: 30,
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 5,
-  },
-  cardTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  eyebrow: {
-    color: C.emerald,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.3,
-  },
-  clubNightTitle: {
-    color: C.white,
-    fontSize: 21,
-    fontWeight: '800',
-    marginTop: 8,
-  },
-  clubNightDate: {
-    color: C.muted,
-    fontSize: 12,
-    marginTop: 7,
-  },
-  calendarIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 13,
-    backgroundColor: C.emeraldDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  calendarEmoji: {
-    fontSize: 19,
-  },
-  attendanceDivider: {
-    height: 1,
-    backgroundColor: C.border,
-    marginVertical: 20,
-  },
-  attendanceQuestion: {
-    color: C.white,
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 14,
-  },
-  attendanceRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  attendanceButton: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 11,
-    backgroundColor: C.surface,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  attendanceSelected: {
-    backgroundColor: C.emerald,
-    borderColor: C.emerald,
-  },
-  attendanceText: {
-    color: C.muted,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  attendanceTextSelected: {
-    color: C.background,
-  },
-  attendanceFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  smallDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: C.emerald,
-    marginRight: 8,
-  },
-  attendanceFooterText: {
-    color: C.muted,
-    fontSize: 11,
-  },
-  sectionHeading: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  sectionTitle: {
-    color: C.white,
-    fontSize: 19,
-    fontWeight: '800',
-  },
-  sectionAction: {
-    color: C.emerald,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  matchCard: {
-    backgroundColor: C.surface,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: C.border,
-    marginBottom: 30,
+  hero: {
+    height: 224,
+    width: '100%',
+    backgroundColor: P.bg,
     overflow: 'hidden',
   },
-  matchTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingTop: 18,
+  heroImage: {
+    opacity: 1,
   },
-  matchBadge: {
-    backgroundColor: C.emeraldDark,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 8,
-  },
-  matchBadgeText: {
-    color: C.emerald,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  matchRound: {
-    color: C.muted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-  matchTeams: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 25,
-    paddingHorizontal: 12,
-  },
-  team: {
+  heroOverlay: {
     flex: 1,
+    paddingHorizontal: 19,
+    justifyContent: 'space-between',
+  },
+  topBar: {
+    paddingTop: 10,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  teamAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 17,
-    backgroundColor: C.emeraldDark,
+  brand: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
+    gap: 10,
   },
-  opponentAvatar: {
-    backgroundColor: '#41345B',
-  },
-  teamAvatarText: {
-    color: C.white,
-    fontSize: 19,
-    fontWeight: '800',
-  },
-  teamNames: {
-    color: C.white,
-    fontSize: 13,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  teamLabel: {
-    color: C.muted,
-    fontSize: 9,
+  brandName: {
+    color: P.white,
+    fontSize: 14,
     fontWeight: '700',
-    letterSpacing: 1,
-    marginTop: 7,
+    lineHeight: 19,
+    letterSpacing: 0.1,
   },
-  vsCircle: {
-    width: 35,
-    height: 35,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: C.border,
+  headerRight: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 3,
+    gap: 17,
   },
-  vsText: {
-    color: C.muted,
-    fontSize: 10,
+  notification: {
+    position: 'relative',
+    padding: 4,
+  },
+  redDot: {
+    position: 'absolute',
+    right: 2,
+    top: 2,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FF4C59',
+  },
+  greeting: {
+    paddingBottom: 45,
+  },
+  hello: {
+    color: P.white,
+    fontSize: 34,
     fontWeight: '800',
+    letterSpacing: -1,
+    lineHeight: 42,
   },
-  matchFooter: {
-    backgroundColor: C.surfaceRaised,
-    borderTopWidth: 1,
-    borderTopColor: C.border,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+  name: {
+    color: P.mint,
   },
-  matchFooterText: {
-    color: C.white,
-    fontSize: 12,
-    fontWeight: '700',
+  subHello: {
+    color: P.white,
+    fontSize: 18,
+    fontWeight: '500',
+    marginTop: 3,
   },
-  courtsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 30,
+
+  sections: { marginTop: -15, paddingHorizontal: 15, gap: 11 },
+  panel: {
+    backgroundColor: P.card,
+    borderColor: P.border, borderWidth: 1,
+    borderRadius: 18, padding: 15,
+    shadowColor: '#000', shadowOpacity: 0.13,
+    shadowRadius: 9, shadowOffset: { width: 0, height: 4 },
   },
-  courtCard: {
-    width: '48%',
-    backgroundColor: C.surface,
-    borderRadius: 17,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 14,
-    marginBottom: 12,
-    minHeight: 158,
+  attendanceRow: {
+    flexDirection: 'row', alignItems: 'center',
+    gap: 12, marginBottom: 14,
   },
-  courtTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  circleIcon: {
+    backgroundColor: '#006448',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  attendanceText: { flex: 1, gap: 3 },
+  attendanceTitle: { color: P.white, fontSize: 18, fontWeight: '800' },
+  attendanceEvent: { color: P.white, fontSize: 15 },
+  secondary: { color: P.muted, fontSize: 12, marginTop: 2 },
+  confirmCircle: {
+    width: 43, height: 43, borderRadius: 22,
+    backgroundColor: P.green, alignItems: 'center', justifyContent: 'center',
+  },
+  attendanceButton: {
+    backgroundColor: '#005B42', height: 43,
+    borderRadius: 11, flexDirection: 'row',
+    alignItems: 'center', justifyContent: 'center', gap: 8,
+  },
+  buttonText: { color: P.white, fontSize: 15, fontWeight: '700' },
+
+  matchHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 11 },
+  matchHeaderText: { flex: 1, gap: 2, paddingTop: 1 },
+  matchTitle: { color: P.white, fontSize: 19, fontWeight: '800' },
+  matchMeta: { color: P.white, fontSize: 14 },
+  badge: {
+    backgroundColor: '#6540B2', paddingHorizontal: 10,
+    paddingVertical: 6, borderRadius: 9,
+  },
+  badgeText: { color: P.white, fontSize: 12, fontWeight: '700' },
+  teams: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', marginTop: 14, marginBottom: 16,
+  },
+  pair: { flex: 1, alignItems: 'center', gap: 7 },
+  pairPhotos: { flexDirection: 'row', justifyContent: 'center' },
+  pairLabel: {
+    color: P.white, fontSize: 12,
+    fontWeight: '600', textAlign: 'center',
+  },
+  versus: { color: P.white, fontSize: 12, width: 29, textAlign: 'center' },
+  primaryButton: {
+    height: 44, backgroundColor: '#008E61',
+    borderRadius: 11, flexDirection: 'row',
+    alignItems: 'center', justifyContent: 'center', gap: 8,
+  },
+
+  overview: { padding: 12 },
+  sectionHeading: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', marginBottom: 12,
+  },
+  sectionTitle: { color: P.white, fontSize: 18, fontWeight: '700' },
+  viewAll: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  viewAllText: { color: P.green, fontSize: 12 },
+  stats: { flexDirection: 'row', gap: 7 },
+  stat: {
+    flex: 1, minWidth: 0, backgroundColor: P.tile,
+    borderWidth: 1, borderColor: '#214239',
+    borderRadius: 12, alignItems: 'center',
+    paddingVertical: 11, paddingHorizontal: 2, gap: 5,
+  },
+  statNumber: { color: P.white, fontSize: 21, fontWeight: '700' },
+  statLabel: { color: P.white, fontSize: 10 },
+  courtList: { marginTop: 13, gap: 7 },
+  courtItem: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: P.tile, borderRadius: 10, padding: 9, gap: 10,
   },
   courtNumber: {
-    color: C.emerald,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
+    width: 29, height: 29, borderRadius: 8,
+    backgroundColor: '#075F46', alignItems: 'center', justifyContent: 'center',
   },
-  liveIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  courtNumberText: { color: P.white, fontWeight: '800' },
+  courtHeading: { color: P.white, fontSize: 12, fontWeight: '700' },
+  courtDetail: { color: P.muted, fontSize: 10, marginTop: 3 },
+
+  quickPanel: {
+    backgroundColor: '#06241D', borderRadius: 17,
+    padding: 12, gap: 12,
   },
-  liveDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: C.emerald,
-    marginRight: 4,
+  actions: { flexDirection: 'row', gap: 7 },
+  action: {
+    flex: 1, minWidth: 0, height: 78,
+    backgroundColor: P.tile, borderWidth: 1,
+    borderColor: '#1C4137', borderRadius: 11,
+    alignItems: 'center', justifyContent: 'center', gap: 8, padding: 4,
   },
-  liveText: {
-    color: C.muted,
-    fontSize: 8,
-    fontWeight: '700',
+  actionLabel: { color: P.white, fontSize: 10, textAlign: 'center' },
+  pressed: { opacity: 0.7 },
+  demo: {
+    color: '#739A8B', fontSize: 8,
+    letterSpacing: 0.8, textAlign: 'center', marginTop: 4,
   },
-  courtType: {
-    color: C.white,
-    fontSize: 14,
-    fontWeight: '800',
-    marginTop: 12,
+
+  navigation: {
+    height: 59, flexDirection: 'row',
+    backgroundColor: '#00140F',
+    borderTopWidth: 1, borderTopColor: '#173C31',
   },
-  courtDivider: {
-    height: 1,
-    backgroundColor: C.border,
-    marginVertical: 11,
+  navButton: {
+    flex: 1, alignItems: 'center',
+    justifyContent: 'center', gap: 4,
   },
-  courtPlayers: {
-    color: C.white,
-    fontSize: 11,
-    fontWeight: '600',
-    textAlign: 'center',
+  navLine: {
+    position: 'absolute', top: 0,
+    width: 30, height: 2, backgroundColor: P.green,
   },
-  versus: {
-    color: C.purple,
-    fontSize: 10,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginVertical: 4,
+  navText: { color: '#B7C6BF', fontSize: 9 },
+
+  otherPage: { padding: 17, paddingBottom: 35 },
+  otherTop: {
+    flexDirection: 'row', alignItems: 'center',
+    gap: 13, marginBottom: 20,
   },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 30,
+  otherTitle: { color: P.white, fontSize: 23, fontWeight: '800' },
+  eyebrow: { color: P.green, fontSize: 11, fontWeight: '800' },
+  detailTitle: { color: P.white, fontSize: 20, fontWeight: '800' },
+  description: {
+    color: P.muted, fontSize: 12,
+    lineHeight: 19, marginTop: 14,
   },
-  statCard: {
-    flex: 1,
-    backgroundColor: C.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: C.border,
-    paddingVertical: 16,
-    alignItems: 'center',
+  positionedHeroImage: {
+    position: 'absolute',
+    width: '150%',
+    height: '105%',
+    top: 1,
+    right: -40,
+    opacity: 1,
   },
-  statValue: {
-    color: C.white,
-    fontSize: 23,
-    fontWeight: '800',
+  profile: { flexDirection: 'row', alignItems: 'center', gap: 13 },
+  menuRow: {
+    paddingVertical: 16, flexDirection: 'row',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1, borderBottomColor: P.border,
   },
-  statLabel: {
-    color: C.muted,
-    fontSize: 10,
-    marginTop: 6,
+  menuText: { color: P.white, fontSize: 14 },
+
+  modalBackground: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center', paddingHorizontal: 20,
   },
-  performanceCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: C.surface,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: C.border,
-    paddingVertical: 24,
-    marginBottom: 30,
+  modal: {
+    backgroundColor: P.card, borderColor: P.border,
+    borderWidth: 1, borderRadius: 20, padding: 19, gap: 11,
   },
-  performanceStat: {
-    flex: 1,
-    alignItems: 'center',
+  modalTop: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  performanceValue: {
-    color: C.white,
-    fontSize: 25,
-    fontWeight: '800',
+  choice: {
+    flexDirection: 'row', alignItems: 'center',
+    gap: 11, backgroundColor: P.tile,
+    padding: 14, borderRadius: 11,
+    borderWidth: 1, borderColor: P.border,
   },
-  performanceLabel: {
-    color: C.muted,
-    fontSize: 11,
-    marginTop: 7,
-  },
-  performanceDivider: {
-    width: 1,
-    height: 35,
-    backgroundColor: C.border,
-  },
-  quickActionsCard: {
-    backgroundColor: C.surface,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: C.border,
-    paddingHorizontal: 16,
-  },
-  quickAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 17,
-  },
-  quickIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 13,
-    backgroundColor: C.surfaceRaised,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 13,
-  },
-  quickIconText: {
-    fontSize: 19,
-  },
-  quickText: {
-    flex: 1,
-  },
-  quickTitle: {
-    color: C.white,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  quickSubtitle: {
-    color: C.muted,
-    fontSize: 11,
-    marginTop: 5,
-  },
-  chevron: {
-    color: C.muted,
-    fontSize: 25,
-  },
-  quickDivider: {
-    height: 1,
-    backgroundColor: C.border,
-  },
-  bottomNote: {
-    color: C.muted,
-    textAlign: 'center',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-    marginTop: 30,
-  },
+  choiceSelected: { borderColor: P.green },
+  choiceText: { color: P.white, flex: 1, fontSize: 14 },
+  modalFootnote: { color: P.muted, fontSize: 10, lineHeight: 15 },
 });
