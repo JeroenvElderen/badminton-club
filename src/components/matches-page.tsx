@@ -1,826 +1,1000 @@
+import { useAppTheme } from '@/providers/theme-provider';
 
+import AttendancePage from '@/components/attendance-page';
+import ClubHeader from '@/components/club-header';
+import { supabase } from '@/lib/supabase';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+    ActivityIndicator,
     Image,
+    Modal,
     Pressable,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
-    View,
+    View
 } from 'react-native';
 
-import AttendancePage from './attendance-page';
-import MatchScoreModal, {
-    type MatchResult,
-} from './match-score-modal';
-
-const C = {
-  bg: '#031B16',
-  card: '#06251E',
-  tile: '#102C27',
-  border: '#185243',
-  green: '#00D995',
-  mint: '#78DCC0',
-  white: '#F6FBF8',
-  muted: '#A6B8B1',
+const BASE_COLORS = {
+    bg: '#031B16',
+    card: '#06251E',
+    tile: '#102C27',
+    border: '#185243',
+    green: '#00D995',
+    mint: '#78DCC0',
+    white: '#F6FBF8',
+    muted: '#A6B8B1',
+    purple: '#6540B2',
+    red: '#FF5669',
 };
+const C = BASE_COLORS;
 
-const HERO = require('../../assets/images/shuttleheader.png');
-
-const PEOPLE: Record<string, number> = {
-  You: 12,
-  Priya: 47,
-  Mark: 13,
-  Daniel: 11,
-  Emily: 44,
-  Tom: 15,
-  Laura: 49,
-  Sarah: 45,
-  Hannah: 48,
-  Chris: 14,
-  James: 16,
-};
 
 type Section = 'Matches' | 'Attendance';
 type Filter = 'Upcoming' | 'Today' | 'Past';
-type MatchType = 'Doubles' | 'Singles';
+type Team = 'A' | 'B';
 
-type Match = {
-  id: string;
-  group: Filter;
-  date: string;
-  time: string;
-  end: string;
-  round: number;
-  court: number;
-  type: MatchType;
-  teamA: string[];
-  teamB: string[];
+type DBMatch = {
+    id: string;
+    session_id: string;
+    court_id: number | null;
+    round_number: number;
+    match_type: 'singles' | 'doubles';
+    status: string;
+    team_a_score: number;
+    team_b_score: number;
+    created_at: string;
 };
 
-const MATCHES: Match[] = [
-  {
-    id: 'm1',
-    group: 'Today',
-    date: 'Today',
-    time: '19:00',
-    end: '20:00',
-    round: 3,
-    court: 2,
-    type: 'Doubles',
-    teamA: ['You', 'Priya'],
-    teamB: ['Mark', 'Daniel'],
-  },
-  {
-    id: 'm2',
-    group: 'Today',
-    date: 'Today',
-    time: '20:00',
-    end: '21:00',
-    round: 4,
-    court: 1,
-    type: 'Singles',
-    teamA: ['You'],
-    teamB: ['James'],
-  },
-  {
-    id: 'm3',
-    group: 'Upcoming',
-    date: 'Thu 24 Apr',
-    time: '19:00',
-    end: '20:00',
-    round: 5,
-    court: 3,
-    type: 'Doubles',
-    teamA: ['You', 'Emily'],
-    teamB: ['Tom', 'Laura'],
-  },
-  {
-    id: 'm4',
-    group: 'Upcoming',
-    date: 'Sat 26 Apr',
-    time: '18:30',
-    end: '19:30',
-    round: 6,
-    court: 1,
-    type: 'Doubles',
-    teamA: ['You', 'Sarah'],
-    teamB: ['Hannah', 'Chris'],
-  },
-  {
-    id: 'm5',
-    group: 'Upcoming',
-    date: 'Mon 28 Apr',
-    time: '19:00',
-    end: '20:00',
-    round: 7,
-    court: 4,
-    type: 'Singles',
-    teamA: ['You'],
-    teamB: ['Tom'],
-  },
-  {
-    id: 'm6',
-    group: 'Upcoming',
-    date: 'Wed 30 Apr',
-    time: '20:00',
-    end: '21:00',
-    round: 8,
-    court: 2,
-    type: 'Doubles',
-    teamA: ['You', 'Laura'],
-    teamB: ['Mark', 'Emily'],
-  },
-  {
-    id: 'm7',
-    group: 'Past',
-    date: 'Mon 14 Apr',
-    time: '19:00',
-    end: '20:00',
-    round: 1,
-    court: 1,
-    type: 'Singles',
-    teamA: ['You'],
-    teamB: ['Daniel'],
-  },
-  {
-    id: 'm8',
-    group: 'Past',
-    date: 'Wed 16 Apr',
-    time: '20:00',
-    end: '21:00',
-    round: 2,
-    court: 3,
-    type: 'Doubles',
-    teamA: ['You', 'Priya'],
-    teamB: ['Tom', 'Sarah'],
-  },
-];
+type DBPlayer = {
+    match_id: string;
+    player_id: string;
+    team: Team;
+    position: number;
+};
 
-function PlayerFaces({ names }: { names: string[] }) {
-  return (
-    <View style={s.faces}>
-      {names.map((name, index) => (
-        <View
-          key={`${name}-${index}`}
-          style={index > 0 ? s.faceOverlap : undefined}
-        >
-          {PEOPLE[name] ? (
-            <Image
-              source={{
-                uri: `https://i.pravatar.cc/150?img=${PEOPLE[name]}`,
-              }}
-              style={s.face}
-            />
-          ) : (
-            <View style={[s.face, s.faceFallback]}>
-              <Text style={s.initial}>
-                {name.charAt(0).toUpperCase()}
-              </Text>
-            </View>
-          )}
-        </View>
-      ))}
-    </View>
-  );
+type DBSession = {
+    id: string;
+    title: string;
+    starts_at: string;
+    ends_at: string;
+};
+
+type DBCourt = {
+    id: number;
+    name: string;
+};
+
+type Person = {
+    player_id: string;
+    display_name: string;
+    avatar_url: string | null;
+};
+
+type MatchView = DBMatch & {
+    session: DBSession;
+    courtName: string;
+    teamA: Person[];
+    teamB: Person[];
+};
+
+function sameDay(a: Date, b: Date) {
+    return (
+        a.getFullYear() === b.getFullYear() &&
+        a.getMonth() === b.getMonth() &&
+        a.getDate() === b.getDate()
+    );
 }
 
-function Team({ names }: { names: string[] }) {
-  return (
-    <View style={s.team}>
-      <PlayerFaces names={names} />
-      <Text numberOfLines={1} style={s.teamName}>
-        {names.join(' & ')}
-      </Text>
-    </View>
-  );
+function formatTime(value: string) {
+    return new Date(value).toLocaleTimeString('en-IE', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    });
+}
+
+function formatDate(value: string) {
+    return new Date(value).toLocaleDateString('en-IE', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+    });
+}
+
+function PlayerFaces({ people }: { people: Person[] }) {
+  const { C, s } = useThemeStyles();
+    return (
+        <View style={s.faces}>
+            {people.map((person, index) => (
+                <View
+                    key={person.player_id}
+                    style={index ? s.faceOverlap : undefined}
+                >
+                    {person.avatar_url ? (
+                        <Image
+                            source={{ uri: person.avatar_url }}
+                            style={s.face}
+                        />
+                    ) : (
+                        <View style={[s.face, s.faceFallback]}>
+                            <Text style={s.initial}>
+                                {person.display_name.charAt(0).toUpperCase()}
+                            </Text>
+                        </View>
+                    )}
+                </View>
+            ))}
+        </View>
+    );
+}
+
+function TeamDisplay({ people }: { people: Person[] }) {
+  const { C, s } = useThemeStyles();
+    return (
+        <View style={s.team}>
+            <PlayerFaces people={people} />
+            <Text numberOfLines={2} style={s.teamName}>
+                {people.length
+                    ? people.map(p => p.display_name).join(' & ')
+                    : 'Players pending'}
+            </Text>
+        </View>
+    );
 }
 
 function MatchCard({
-  match,
-  onPress,
-  hasResult,
+    match,
+    onPress,
 }: {
-  match: Match;
-  onPress: () => void;
-  hasResult: boolean;
+    match: MatchView;
+    onPress: () => void;
 }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        s.matchCard,
-        pressed && { opacity: 0.8 },
-      ]}
-    >
-      <View style={s.matchDate}>
-        {match.group !== 'Today' && (
-          <Text style={s.dateLabel}>{match.date}</Text>
-        )}
+  const { C, s } = useThemeStyles();
+    const finished = match.status === 'completed';
 
-        <Text style={s.time}>{match.time}</Text>
-        <Text style={s.endTime}>{match.end}</Text>
-      </View>
-
-      <View style={s.accentLine} />
-
-      <View style={s.matchBody}>
-        <View style={s.matchTop}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.round}>Round {match.round}</Text>
-
-            <Text style={s.matchMeta}>
-              Court {match.court} · {match.type}
-            </Text>
-          </View>
-
-          <View
-            style={[
-              s.typeBadge,
-              match.type === 'Singles' && s.singlesBadge,
+    return (
+        <Pressable
+            onPress={onPress}
+            style={({ pressed }) => [
+                s.matchCard,
+                pressed && { opacity: 0.8 },
             ]}
-          >
-            <Text style={s.typeText}>{match.type}</Text>
-          </View>
-        </View>
+        >
+            <View style={s.matchDate}>
+                <Text style={s.dateLabel}>
+                    {formatDate(match.session.starts_at)}
+                </Text>
+                <Text style={s.time}>
+                    {formatTime(match.session.starts_at)}
+                </Text>
+                <Text style={s.endTime}>
+                    {formatTime(match.session.ends_at)}
+                </Text>
+            </View>
 
-        <View style={s.teams}>
-          <Team names={match.teamA} />
-          <Text style={s.vs}>vs</Text>
-          <Team names={match.teamB} />
-        </View>
+            <View style={s.accentLine} />
 
-        {hasResult && (
-          <View style={s.savedResult}>
+            <View style={s.matchBody}>
+                <View style={s.matchTop}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={s.round}>
+                            Round {match.round_number}
+                        </Text>
+                        <Text style={s.matchMeta}>
+                            {match.courtName} ·{' '}
+                            {match.match_type === 'doubles'
+                                ? 'Doubles'
+                                : 'Singles'}
+                        </Text>
+                    </View>
+
+                    <View
+                        style={[
+                            s.typeBadge,
+                            match.match_type === 'singles' && s.singlesBadge,
+                        ]}
+                    >
+                        <Text style={s.typeText}>
+                            {match.status === 'in_progress'
+                                ? 'LIVE'
+                                : finished
+                                    ? 'Finished'
+                                    : 'Scheduled'}
+                        </Text>
+                    </View>
+                </View>
+
+                <View style={s.teams}>
+                    <TeamDisplay people={match.teamA} />
+                    <Text style={s.vs}>vs</Text>
+                    <TeamDisplay people={match.teamB} />
+                </View>
+
+                {(finished || match.status === 'in_progress') && (
+                    <View style={s.scoreRow}>
+                        <Ionicons
+                            name="tennisball-outline"
+                            size={15}
+                            color={C.green}
+                        />
+                        <Text style={s.scoreText}>
+                            {match.team_a_score} – {match.team_b_score}
+                        </Text>
+                    </View>
+                )}
+            </View>
+
             <Ionicons
-              name="checkmark-circle"
-              size={14}
-              color={C.green}
+                name="chevron-forward"
+                size={19}
+                color={C.white}
             />
-            <Text style={s.savedResultText}>Score saved</Text>
-          </View>
-        )}
-      </View>
-
-      <Ionicons
-        name="chevron-forward"
-        size={19}
-        color={C.white}
-      />
-    </Pressable>
-  );
+        </Pressable>
+    );
 }
 
 export default function MatchesPage() {
-  const [section, setSection] = useState<Section>('Matches');
-  const [filter, setFilter] = useState<Filter>('Upcoming');
+  const { C, s } = useThemeStyles();
+    const [section, setSection] = useState<Section>('Matches');
+    const [filter, setFilter] = useState<Filter>('Upcoming');
+    const [userId, setUserId] = useState<string | null>(null);
+    const [matches, setMatches] = useState<MatchView[]>([]);
+    const [selected, setSelected] = useState<MatchView | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-  const [selected, setSelected] = useState<Match | null>(null);
+    useEffect(() => {
+        let active = true;
 
-  const [results, setResults] = useState<
-    Record<string, MatchResult>
-  >({});
+        supabase.auth.getUser().then(({ data, error }) => {
+            if (!active) return;
+            if (error) {
+                setError(error.message);
+                setLoading(false);
+            } else {
+                setUserId(data.user?.id ?? null);
+                if (!data.user) setLoading(false);
+            }
+        });
 
-  const today = useMemo(
-    () => MATCHES.filter(m => m.group === 'Today'),
-    []
-  );
+        return () => {
+            active = false;
+        };
+    }, []);
 
-  const upcoming = useMemo(
-    () => MATCHES.filter(m => m.group === 'Upcoming'),
-    []
-  );
+    const load = useCallback(async () => {
+        if (!userId) return;
 
-  const past = useMemo(
-    () => MATCHES.filter(m => m.group === 'Past'),
-    []
-  );
+        try {
+            // Find matches assigned to this player.
+            const { data: assignments, error: assignmentError } =
+                await supabase
+                    .from('match_players')
+                    .select('match_id')
+                    .eq('player_id', userId);
 
-  const visible = useMemo(() => {
-    if (filter === 'Today') return today;
-    if (filter === 'Past') return past;
-    return [...today, ...upcoming];
-  }, [filter, today, upcoming, past]);
+            if (assignmentError) throw assignmentError;
 
-  function renderMatch(match: Match) {
-    return (
-      <MatchCard
-        key={match.id}
-        match={match}
-        hasResult={Boolean(results[match.id])}
-        onPress={() => setSelected(match)}
-      />
+            const ids = (assignments ?? []).map(a => a.match_id);
+
+            if (!ids.length) {
+                setMatches([]);
+                setError(null);
+                return;
+            }
+
+            const { data: matchRows, error: matchError } =
+                await supabase
+                    .from('matches')
+                    .select(
+                        'id, session_id, court_id, round_number, match_type, status, team_a_score, team_b_score, created_at'
+                    )
+                    .in('id', ids)
+                    .neq('status', 'cancelled');
+
+            if (matchError) throw matchError;
+
+            const rawMatches = (matchRows ?? []) as DBMatch[];
+
+            if (!rawMatches.length) {
+                setMatches([]);
+                setError(null);
+                return;
+            }
+
+            const sessionIds = [
+                ...new Set(rawMatches.map(m => m.session_id)),
+            ];
+
+            const matchIds = rawMatches.map(m => m.id);
+
+            const [sessionsResult, playersResult, courtsResult] =
+                await Promise.all([
+                    supabase
+                        .from('club_sessions')
+                        .select('id, title, starts_at, ends_at')
+                        .in('id', sessionIds),
+
+                    supabase
+                        .from('match_players')
+                        .select('match_id, player_id, team, position')
+                        .in('match_id', matchIds),
+
+                    supabase
+                        .from('courts')
+                        .select('id, name'),
+                ]);
+
+            if (sessionsResult.error) throw sessionsResult.error;
+            if (playersResult.error) throw playersResult.error;
+            if (courtsResult.error) throw courtsResult.error;
+
+            const sessions = (sessionsResult.data ?? []) as DBSession[];
+            const players = (playersResult.data ?? []) as DBPlayer[];
+            const courts = (courtsResult.data ?? []) as DBCourt[];
+
+            // Fetch public-facing player names through the
+            // restricted session-directory RPC.
+            const directories = await Promise.all(
+                sessionIds.map(async sessionId => {
+                    const { data, error: rpcError } = await supabase.rpc(
+                        'riverside_session_players',
+                        { p_session_id: sessionId }
+                    );
+
+                    if (rpcError) throw rpcError;
+
+                    return data ?? [];
+                })
+            );
+
+            const names = new Map<string, Person>();
+
+            for (const directory of directories) {
+                for (const player of directory) {
+                    names.set(player.player_id, {
+                        player_id: player.player_id,
+                        display_name: player.display_name,
+                        avatar_url: player.avatar_url,
+                    });
+                }
+            }
+
+            const ownProfileResult = await supabase
+                .from('profiles')
+                .select('display_name, full_name, avatar_url')
+                .eq('id', userId)
+                .maybeSingle();
+
+            if (ownProfileResult.error) throw ownProfileResult.error;
+
+            names.set(userId, {
+                player_id: userId,
+                display_name: 'You',
+                avatar_url: ownProfileResult.data?.avatar_url ?? null,
+            });
+
+            const toPerson = (id: string): Person =>
+                names.get(id) ?? {
+                    player_id: id,
+                    display_name: 'Club player',
+                    avatar_url: null,
+                };
+
+            const result: MatchView[] = rawMatches.flatMap(match => {
+                const session = sessions.find(
+                    s => s.id === match.session_id
+                );
+
+                if (!session) return [];
+
+                const participants = players
+                    .filter(p => p.match_id === match.id)
+                    .sort((a, b) => a.position - b.position);
+
+                return [{
+                    ...match,
+                    session,
+                    courtName:
+                        courts.find(c => c.id === match.court_id)?.name ??
+                        'Court pending',
+                    teamA: participants
+                        .filter(p => p.team === 'A')
+                        .map(p => toPerson(p.player_id)),
+                    teamB: participants
+                        .filter(p => p.team === 'B')
+                        .map(p => toPerson(p.player_id)),
+                }];
+            });
+
+            result.sort(
+                (a, b) =>
+                    new Date(a.session.starts_at).getTime() -
+                    new Date(b.session.starts_at).getTime() ||
+                    a.round_number - b.round_number
+            );
+
+            setMatches(result);
+            setError(null);
+        } catch (e) {
+            setError(
+                e instanceof Error ? e.message : 'Unable to load matches'
+            );
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    }, [userId]);
+
+    useEffect(() => {
+        if (!userId) return;
+
+        void load();
+
+        const channel = supabase
+            .channel(`riverside-matches-${userId}`)
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'matches' },
+                () => { void load(); }
+            )
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'match_players' },
+                () => { void load(); }
+            )
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'club_sessions' },
+                () => { void load(); }
+            )
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'courts' },
+                () => { void load(); }
+            )
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'session_attendance' },
+                () => { void load(); }
+            )
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'profiles' },
+                () => { void load(); }
+            )
+            .subscribe(status => {
+                if (status === 'SUBSCRIBED') void load();
+            });
+
+        return () => {
+            void supabase.removeChannel(channel);
+        };
+    }, [load, userId]);
+
+    const now = new Date();
+
+    const today = useMemo(
+        () => matches.filter(
+            m =>
+                m.status !== 'completed' &&
+                sameDay(new Date(m.session.starts_at), now)
+        ),
+        [matches]
     );
-  }
 
-  return (
-    <View style={s.root}>
-      <ScrollView
-        style={s.scroll}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={s.scrollContent}
-      >
-        <View style={s.hero}>
-          <Image
-            source={HERO}
-            resizeMode="cover"
-            style={s.heroImage}
-          />
+    const upcoming = useMemo(
+        () => matches.filter(
+            m =>
+                m.status !== 'completed' &&
+                !sameDay(new Date(m.session.starts_at), now) &&
+                new Date(m.session.ends_at) >= now
+        ),
+        [matches]
+    );
 
-          <View style={s.photoTint} pointerEvents="none" />
+    const past = useMemo(
+        () => matches.filter(
+            m =>
+                m.status === 'completed' ||
+                new Date(m.session.ends_at) < now
+        ).reverse(),
+        [matches]
+    );
 
-          <LinearGradient
-            colors={[
-              'rgba(3,27,22,0.52)',
-              'rgba(3,27,22,0.14)',
-              'rgba(3,27,22,0.32)',
-              C.bg,
-            ]}
-            locations={[0, 0.34, 0.68, 1]}
-            style={s.heroOverlay}
-          >
-            <View style={s.brandRow}>
-              <View style={s.brandLeft}>
-                <Text style={s.brandIcon}>🏸</Text>
+    const visible =
+        filter === 'Today'
+            ? today
+            : filter === 'Past'
+                ? past
+                : [...today, ...upcoming];
 
-                <View>
-                  <Text style={s.brandText}>Riverside</Text>
-                  <Text style={s.brandText}>Badminton Club</Text>
-                </View>
-              </View>
+    const renderMatch = (match: MatchView) => (
+        <MatchCard
+            key={match.id}
+            match={match}
+            onPress={() => setSelected(match)}
+        />
+    );
 
-              <View style={s.brandRight}>
-                <View style={s.bell}>
-                  <Ionicons
-                    name="notifications-outline"
-                    size={25}
-                    color={C.white}
-                  />
-                  <View style={s.redDot} />
-                </View>
-
-                <Image
-                  source={{
-                    uri: 'https://i.pravatar.cc/150?img=12',
-                  }}
-                  style={s.profilePhoto}
-                />
-              </View>
-            </View>
-
-            <View style={s.heroTitleBlock}>
-              <Text style={s.heroTitle}>
-                {section === 'Matches' ? (
-                  <>
-                    M<Text style={s.heroMint}>atches</Text>
-                  </>
-                ) : (
-                  <>
-                    Atten<Text style={s.heroMint}>dance</Text>
-                  </>
-                )}
-              </Text>
-
-              <Text style={s.heroSubtitle}>
-                {section === 'Matches'
-                  ? 'View and score your matches'
-                  : "See who's coming tonight"}
-              </Text>
-            </View>
-          </LinearGradient>
-        </View>
-
-        <View style={s.content}>
-          <View style={s.mainSegment}>
-            {(['Matches', 'Attendance'] as Section[]).map(item => (
-              <Pressable
-                key={item}
-                onPress={() => setSection(item)}
-                style={[
-                  s.mainSegmentButton,
-                  section === item && s.segmentActive,
-                ]}
-              >
-                <Ionicons
-                  name={
-                    item === 'Matches'
-                      ? 'tennisball-outline'
-                      : 'calendar-outline'
-                  }
-                  size={18}
-                  color={section === item ? C.white : C.muted}
+    return (
+        <View style={s.root}>
+            <ScrollView
+                style={s.scroll}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={s.scrollContent}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        tintColor={C.green}
+                        onRefresh={() => {
+                            setRefreshing(true);
+                            void load();
+                        }}
+                    />
+                }
+            >
+                <ClubHeader
+                    title="Matches"
+                    highlight="ches"
+                    subtitle="Your matches and club sessions"
                 />
 
-                <Text
-                  style={[
-                    s.mainSegmentText,
-                    section === item && s.segmentTextActive,
-                  ]}
-                >
-                  {item}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {section === 'Attendance' ? (
-            <AttendancePage />
-          ) : (
-            <>
-              <View style={s.filterSegment}>
-                {(['Upcoming', 'Today', 'Past'] as Filter[]).map(item => (
-                  <Pressable
-                    key={item}
-                    onPress={() => setFilter(item)}
-                    style={[
-                      s.filterButton,
-                      filter === item && s.segmentActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        s.filterText,
-                        filter === item && s.segmentTextActive,
-                      ]}
-                    >
-                      {item}
-                      {item === 'Upcoming'
-                        ? ` (${today.length + upcoming.length})`
-                        : item === 'Today'
-                          ? ` (${today.length})`
-                          : ` (${past.length})`}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              {filter === 'Upcoming' ? (
-                <>
-                  <View style={s.sectionRow}>
-                    <View style={s.headingGroup}>
-                      <Text style={s.sectionTitle}>Today</Text>
-                      <Text style={s.sectionSub}>· Demo schedule</Text>
+                <View style={s.content}>
+                    <View style={s.mainSegment}>
+                        {(['Matches', 'Attendance'] as Section[]).map(item => (
+                            <Pressable
+                                key={item}
+                                onPress={() => setSection(item)}
+                                style={[
+                                    s.mainSegmentButton,
+                                    section === item && s.segmentActive,
+                                ]}
+                            >
+                                <Ionicons
+                                    name={
+                                        item === 'Matches'
+                                            ? 'tennisball-outline'
+                                            : 'calendar-outline'
+                                    }
+                                    size={18}
+                                    color={section === item ? C.white : C.muted}
+                                />
+                                <Text
+                                    style={[
+                                        s.mainSegmentText,
+                                        section === item && s.segmentTextActive,
+                                    ]}
+                                >
+                                    {item}
+                                </Text>
+                            </Pressable>
+                        ))}
                     </View>
 
-                    <Pressable onPress={() => setFilter('Today')}>
-                      <Text style={s.viewLink}>View Today ›</Text>
-                    </Pressable>
-                  </View>
+                    {section === 'Attendance' ? (
+                        <AttendancePage />
+                    ) : (
+                        <>
+                            <View style={s.filterSegment}>
+                                {(['Upcoming', 'Today', 'Past'] as Filter[]).map(item => (
+                                    <Pressable
+                                        key={item}
+                                        onPress={() => setFilter(item)}
+                                        style={[
+                                            s.filterButton,
+                                            filter === item && s.segmentActive,
+                                        ]}
+                                    >
+                                        <Text
+                                            style={[
+                                                s.filterText,
+                                                filter === item && s.segmentTextActive,
+                                            ]}
+                                        >
+                                            {item} ({
+                                                item === 'Upcoming'
+                                                    ? today.length + upcoming.length
+                                                    : item === 'Today'
+                                                        ? today.length
+                                                        : past.length
+                                            })
+                                        </Text>
+                                    </Pressable>
+                                ))}
+                            </View>
 
-                  {today.map(renderMatch)}
+                            {loading && (
+                                <ActivityIndicator
+                                    size="large"
+                                    color={C.green}
+                                    style={{ marginVertical: 35 }}
+                                />
+                            )}
 
-                  <View style={[s.sectionRow, { marginTop: 18 }]}>
-                    <Text style={s.sectionTitle}>
-                      Upcoming Matches
-                    </Text>
-                    <Text style={s.viewLink}>
-                      {upcoming.length} scheduled
-                    </Text>
-                  </View>
+                            {error && (
+                                <Pressable onPress={() => void load()}>
+                                    <Text style={s.error}>
+                                        {error} · Tap to retry
+                                    </Text>
+                                </Pressable>
+                            )}
 
-                  {upcoming.map(renderMatch)}
-                </>
-              ) : (
-                <>
-                  <View style={s.sectionRow}>
-                    <Text style={s.sectionTitle}>
-                      {filter === 'Today'
-                        ? "Today's Matches"
-                        : 'Past Matches'}
-                    </Text>
+                            {!loading && !error && filter === 'Upcoming' ? (
+                                <>
+                                    <View style={s.sectionRow}>
+                                        <Text style={s.sectionTitle}>Today</Text>
+                                        <Pressable onPress={() => setFilter('Today')}>
+                                            <Text style={s.viewLink}>View Today ›</Text>
+                                        </Pressable>
+                                    </View>
 
-                    <Text style={s.viewLink}>
-                      {visible.length} matches
-                    </Text>
-                  </View>
+                                    {today.map(renderMatch)}
 
-                  {visible.map(renderMatch)}
-                </>
-              )}
+                                    <View style={[s.sectionRow, { marginTop: 18 }]}>
+                                        <Text style={s.sectionTitle}>
+                                            Upcoming Matches
+                                        </Text>
+                                        <Text style={s.viewLink}>
+                                            {upcoming.length} scheduled
+                                        </Text>
+                                    </View>
 
-              {visible.length === 0 && (
-                <Text style={s.empty}>
-                  No matches in this category.
-                </Text>
-              )}
+                                    {upcoming.map(renderMatch)}
+                                </>
+                            ) : !loading && !error ? (
+                                <>
+                                    <View style={s.sectionRow}>
+                                        <Text style={s.sectionTitle}>
+                                            {filter === 'Today'
+                                                ? "Today's Matches"
+                                                : 'Past Matches'}
+                                        </Text>
+                                        <Text style={s.viewLink}>
+                                            {visible.length} matches
+                                        </Text>
+                                    </View>
+                                    {visible.map(renderMatch)}
+                                </>
+                            ) : null}
 
-              <Text style={s.demoNote}>
-                DEMONSTRATION MATCHES · SCORES ARE LOCAL ONLY
-              </Text>
-            </>
-          )}
+                            {!loading && !error && visible.length === 0 && (
+                                <View style={s.emptyPanel}>
+                                    <Ionicons
+                                        name="tennisball-outline"
+                                        size={28}
+                                        color={C.green}
+                                    />
+                                    <Text style={s.empty}>
+                                        No matches in this category yet.
+                                    </Text>
+                                </View>
+                            )}
+                        </>
+                    )}
+                </View>
+            </ScrollView>
+
+            <Modal
+                visible={selected !== null}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setSelected(null)}
+            >
+                <View style={s.modalShade}>
+                    <View style={s.modalPanel}>
+                        <View style={s.modalHeader}>
+                            <Text style={s.modalTitle}>
+                                Match Details
+                            </Text>
+                            <Pressable onPress={() => setSelected(null)}>
+                                <Ionicons
+                                    name="close"
+                                    size={24}
+                                    color={C.white}
+                                />
+                            </Pressable>
+                        </View>
+
+                        {selected && (
+                            <>
+                                <Text style={s.modalMeta}>
+                                    {selected.session.title}
+                                </Text>
+                                <Text style={s.modalMeta}>
+                                    {formatDate(selected.session.starts_at)}
+                                    {' · '}
+                                    {selected.courtName}
+                                    {' · '}
+                                    Round {selected.round_number}
+                                </Text>
+
+                                <View style={s.modalTeams}>
+                                    <TeamDisplay people={selected.teamA} />
+                                    <Text style={s.vs}>VS</Text>
+                                    <TeamDisplay people={selected.teamB} />
+                                </View>
+
+                                <Text style={s.modalScore}>
+                                    {selected.status === 'completed' ||
+                                        selected.status === 'in_progress'
+                                        ? `${selected.team_a_score} – ${selected.team_b_score}`
+                                        : 'Not started'}
+                                </Text>
+
+                                <Text style={s.modalMeta}>
+                                    Status: {selected.status.replace('_', ' ')}
+                                </Text>
+                            </>
+                        )}
+                    </View>
+                </View>
+            </Modal>
         </View>
-      </ScrollView>
-
-      <MatchScoreModal
-        match={selected}
-        result={
-          selected
-            ? results[selected.id]
-            : undefined
-        }
-        onClose={() => setSelected(null)}
-        onSave={(matchId, result) => {
-          setResults(previous => ({
-            ...previous,
-            [matchId]: result,
-          }));
-        }}
-      />
-    </View>
-  );
+    );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg },
-  scroll: { flex: 1 },
-  scrollContent: { paddingBottom: 30 },
 
-  hero: {
-    height: 224,
-    overflow: 'hidden',
-    backgroundColor: C.bg,
-  },
-  heroImage: {
-    position: 'absolute',
-    width: '150%',
-    height: '105%',
-    top: 1,
-    right: -40,
-  },
-  photoTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,42,32,0.14)',
-  },
-  heroOverlay: {
-    flex: 1,
-    paddingHorizontal: 19,
-    justifyContent: 'space-between',
-  },
+function useThemeStyles() {
+  const { theme } = useAppTheme();
+  const C = { ...BASE_COLORS,
+    bg: theme.background,
+    card: theme.surface,
+    tile: theme.tile,
+    border: theme.border,
+    green: theme.accent,
+    mint: theme.accentSoft,
+    white: theme.text,
+    muted: theme.muted,
+  };
+  const s = makeStyles(C);
+  return { C, s, theme };
+}
 
-  brandRow: {
-    paddingTop: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  brandLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  brandIcon: { fontSize: 29 },
-  brandText: {
-    color: C.white,
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 19,
-  },
-  brandRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  bell: { padding: 4 },
-  redDot: {
-    position: 'absolute',
-    right: 2,
-    top: 2,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#FF4C59',
-  },
-  profilePhoto: {
-    width: 43,
-    height: 43,
-    borderRadius: 22,
-    borderWidth: 2,
-    borderColor: '#D9E6E1',
-  },
-
-  heroTitleBlock: { paddingBottom: 33 },
-  heroTitle: {
-    color: C.white,
-    fontSize: 35,
-    fontWeight: '800',
-    letterSpacing: -1,
-  },
-  heroMint: { color: C.mint },
-  heroSubtitle: {
-    color: C.white,
-    fontSize: 14,
-    marginTop: 2,
-  },
-
-  content: {
-    paddingHorizontal: 15,
-    marginTop: -4,
-    gap: 11,
-  },
-
-  mainSegment: {
-    flexDirection: 'row',
-    backgroundColor: C.tile,
-    borderColor: C.border,
-    borderWidth: 1,
-    borderRadius: 13,
-    padding: 4,
-    gap: 4,
-  },
-  mainSegmentButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 10,
-  },
-  mainSegmentText: {
-    color: C.muted,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-
-  filterSegment: {
-    flexDirection: 'row',
-    backgroundColor: C.tile,
-    borderColor: C.border,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 3,
-    marginBottom: 5,
-  },
-  filterButton: {
-    flex: 1,
-    paddingVertical: 11,
-    alignItems: 'center',
-    borderRadius: 9,
-  },
-  filterText: {
-    color: C.white,
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  segmentActive: { backgroundColor: '#008E61' },
-  segmentTextActive: {
-    color: C.white,
-    fontWeight: '800',
-  },
-
-  sectionRow: {
-    marginTop: 4,
-    marginBottom: 3,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headingGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  sectionTitle: {
-    color: C.white,
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  sectionSub: { color: C.muted, fontSize: 11 },
-  viewLink: { color: C.green, fontSize: 12 },
-
-  matchCard: {
-    backgroundColor: C.card,
-    borderColor: C.border,
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 12,
-    minHeight: 115,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  matchDate: {
-    width: 63,
-    justifyContent: 'center',
-    gap: 3,
-  },
-  dateLabel: {
-    color: C.white,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  time: {
-    color: C.white,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  endTime: { color: C.muted, fontSize: 12 },
-  accentLine: {
-    width: 2,
-    alignSelf: 'stretch',
-    backgroundColor: C.green,
-    borderRadius: 2,
-  },
-
-  matchBody: { flex: 1, minWidth: 0 },
-  matchTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-  },
-  round: {
-    color: C.white,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  matchMeta: {
-    color: C.muted,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  typeBadge: {
-    backgroundColor: '#6540B2',
-    borderRadius: 7,
-    paddingHorizontal: 7,
-    paddingVertical: 4,
-  },
-  singlesBadge: { backgroundColor: '#008E61' },
-  typeText: {
-    color: C.white,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-
-  teams: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 9,
-  },
-  team: {
-    flex: 1,
-    minWidth: 0,
-    alignItems: 'center',
-    gap: 4,
-  },
-  faces: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
-  face: {
-    width: 31,
-    height: 31,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#D9E6E1',
-  },
-  faceOverlap: { marginLeft: -8 },
-  faceFallback: {
-    backgroundColor: '#125D48',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  initial: {
-    color: C.white,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  teamName: {
-    color: C.white,
-    fontSize: 11,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  vs: {
-    color: C.white,
-    fontSize: 11,
-    paddingHorizontal: 5,
-  },
-
-  savedResult: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    marginTop: 7,
-  },
-  savedResultText: {
-    color: C.green,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  empty: {
-    color: C.muted,
-    textAlign: 'center',
-    padding: 30,
-  },
-  demoNote: {
-    color: '#739A8B',
-    fontSize: 9,
-    textAlign: 'center',
-    letterSpacing: 0.4,
-    marginTop: 14,
-  },
+const makeStyles = (C: typeof BASE_COLORS) => StyleSheet.create({
+    root: { flex: 1, backgroundColor: C.bg },
+    scroll: { flex: 1 },
+    scrollContent: { paddingBottom: 30 },
+    content: {
+        paddingHorizontal: 15,
+        marginTop: -4,
+        gap: 11,
+    },
+    mainSegment: {
+        flexDirection: 'row',
+        backgroundColor: C.tile,
+        borderColor: C.border,
+        borderWidth: 1,
+        borderRadius: 13,
+        padding: 4,
+        gap: 4,
+    },
+    mainSegmentButton: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 12,
+        borderRadius: 10,
+    },
+    mainSegmentText: {
+        color: C.muted,
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    filterSegment: {
+        flexDirection: 'row',
+        backgroundColor: C.tile,
+        borderColor: C.border,
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 3,
+        marginBottom: 5,
+    },
+    filterButton: {
+        flex: 1,
+        paddingVertical: 11,
+        alignItems: 'center',
+        borderRadius: 9,
+    },
+    filterText: {
+        color: C.white,
+        fontSize: 12,
+        fontWeight: '500',
+    },
+    segmentActive: { backgroundColor: '#008E61' },
+    segmentTextActive: {
+        color: C.white,
+        fontWeight: '800',
+    },
+    sectionRow: {
+        marginTop: 4,
+        marginBottom: 3,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    sectionTitle: {
+        color: C.white,
+        fontSize: 17,
+        fontWeight: '800',
+    },
+    viewLink: { color: C.green, fontSize: 12 },
+    matchCard: {
+        backgroundColor: C.card,
+        borderColor: C.border,
+        borderWidth: 1,
+        borderRadius: 14,
+        padding: 12,
+        minHeight: 115,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    matchDate: {
+        width: 63,
+        justifyContent: 'center',
+        gap: 3,
+    },
+    dateLabel: {
+        color: C.white,
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    time: {
+        color: C.white,
+        fontSize: 16,
+        fontWeight: '800',
+    },
+    endTime: { color: C.muted, fontSize: 12 },
+    accentLine: {
+        width: 2,
+        alignSelf: 'stretch',
+        backgroundColor: C.green,
+        borderRadius: 2,
+    },
+    matchBody: { flex: 1, minWidth: 0 },
+    matchTop: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 6,
+    },
+    round: {
+        color: C.white,
+        fontSize: 16,
+        fontWeight: '800',
+    },
+    matchMeta: {
+        color: C.muted,
+        fontSize: 12,
+        marginTop: 2,
+    },
+    typeBadge: {
+        backgroundColor: C.purple,
+        borderRadius: 7,
+        paddingHorizontal: 7,
+        paddingVertical: 4,
+    },
+    singlesBadge: { backgroundColor: '#008E61' },
+    typeText: {
+        color: C.white,
+        fontSize: 10,
+        fontWeight: '700',
+    },
+    teams: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 9,
+    },
+    team: {
+        flex: 1,
+        minWidth: 0,
+        alignItems: 'center',
+        gap: 4,
+    },
+    faces: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+    },
+    face: {
+        width: 31,
+        height: 31,
+        borderRadius: 16,
+        borderWidth: 2,
+        borderColor: '#D9E6E1',
+    },
+    faceOverlap: { marginLeft: -8 },
+    faceFallback: {
+        backgroundColor: '#125D48',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    initial: {
+        color: C.white,
+        fontSize: 13,
+        fontWeight: '800',
+    },
+    teamName: {
+        color: C.white,
+        fontSize: 11,
+        fontWeight: '600',
+        textAlign: 'center',
+    },
+    vs: {
+        color: C.white,
+        fontSize: 11,
+        paddingHorizontal: 5,
+    },
+    scoreRow: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 6,
+        marginTop: 9,
+    },
+    scoreText: {
+        color: C.green,
+        fontSize: 14,
+        fontWeight: '800',
+    },
+    emptyPanel: {
+        padding: 30,
+        alignItems: 'center',
+        gap: 10,
+        backgroundColor: C.card,
+        borderRadius: 14,
+    },
+    empty: {
+        color: C.muted,
+        textAlign: 'center',
+    },
+    error: {
+        color: C.red,
+        textAlign: 'center',
+        padding: 16,
+    },
+    modalShade: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.76)',
+        justifyContent: 'center',
+        padding: 20,
+    },
+    modalPanel: {
+        backgroundColor: C.card,
+        borderColor: C.border,
+        borderWidth: 1,
+        borderRadius: 18,
+        padding: 18,
+        gap: 12,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    modalTitle: {
+        color: C.white,
+        fontSize: 21,
+        fontWeight: '800',
+    },
+    modalMeta: {
+        color: C.muted,
+        fontSize: 13,
+    },
+    modalTeams: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginVertical: 14,
+    },
+    modalScore: {
+        color: C.green,
+        fontSize: 27,
+        fontWeight: '800',
+        textAlign: 'center',
+    },
 });

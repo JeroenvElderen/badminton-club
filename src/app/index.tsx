@@ -1,11 +1,19 @@
+import AuthScreen from '@/components/auth-screen';
+import ClubBottomNav, {
+  type ClubTab,
+} from '@/components/club-bottom-nav';
+import ClubHeader from '@/components/club-header';
 import LeaderboardPage from '@/components/leaderboard-page';
 import MatchesPage from '@/components/matches-page';
 import MorePage from '@/components/more-page';
 import StatsPage from '@/components/stats-page';
+import { supabase } from '@/lib/supabase';
+import { AppThemeProvider, useAppTheme } from '@/providers/theme-provider';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { LinearGradient } from 'expo-linear-gradient';
-import React, { useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
+import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Modal,
   Pressable,
@@ -15,13 +23,21 @@ import {
   Text,
   View
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import {
+  useHomeData,
+  type Attendance,
+  type HomeData,
+} from '@/hooks/use-home-data';
+
+import { Alert } from 'react-native';
+
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
-type Attendance = 'going' | 'maybe' | 'not-going';
-type Tab = 'Home' | 'Matches' | 'Stats' | 'Leaderboard' | 'More';
+type Tab = ClubTab;
 
-const P = {
+const BASE_COLORS = {
   bg: '#031B16',
   card: '#06251E',
   tile: '#102C27',
@@ -34,6 +50,8 @@ const P = {
   blue: '#55B6F7',
   orange: '#F5A44D',
 };
+const P = BASE_COLORS;
+
 
 const PHOTO = {
   hero: require('../../assets/images/shuttleheader.png'),
@@ -67,6 +85,7 @@ function I({
   size?: number;
   color?: string;
 }) {
+  const { P, s } = useThemeStyles();
   return <Ionicons name={name} size={size} color={color} />;
 }
 
@@ -75,6 +94,7 @@ function Shuttlecock({ size = 32, color = P.white }: {
   size?: number;
   color?: string;
 }) {
+  const { P, s } = useThemeStyles();
   return (
     <View style={{ width: size, height: size, justifyContent: 'center' }}>
       <Text
@@ -92,6 +112,7 @@ function Shuttlecock({ size = 32, color = P.white }: {
 }
 
 function Avatar({ url, size = 38 }: { url: string; size?: number }) {
+  const { P, s } = useThemeStyles();
   return (
     <Image
       source={{ uri: url }}
@@ -111,6 +132,7 @@ function Panel({ children, style }: {
   children: React.ReactNode;
   style?: object;
 }) {
+  const { P, s } = useThemeStyles();
   return <View style={[s.panel, style]}>{children}</View>;
 }
 
@@ -121,6 +143,7 @@ function CircleIcon({
   name: IconName;
   size?: number;
 }) {
+  const { P, s } = useThemeStyles();
   return (
     <View style={[s.circleIcon, { width: size, height: size, borderRadius: size / 2 }]}>
       <I name={name} size={size * 0.52} />
@@ -137,6 +160,7 @@ function Pair({
   second: string;
   label: string;
 }) {
+  const { P, s } = useThemeStyles();
   return (
     <View style={s.pair}>
       <View style={s.pairPhotos}>
@@ -151,6 +175,7 @@ function Pair({
 }
 
 function MatchTeams() {
+  const { P, s } = useThemeStyles();
   return (
     <View style={s.teams}>
       <Pair first={PHOTO.alex} second={PHOTO.priya} label="You & Priya" />
@@ -171,6 +196,7 @@ function Stat({
   number: string;
   label: string;
 }) {
+  const { P, s } = useThemeStyles();
   return (
     <View style={s.stat}>
       <I name={icon} color={color} size={23} />
@@ -189,6 +215,7 @@ function Action({
   label: string;
   onPress: () => void;
 }) {
+  const { P, s } = useThemeStyles();
   return (
     <Pressable style={({ pressed }) => [s.action, pressed && s.pressed]} onPress={onPress}>
       <I name={icon} size={25} color={P.green} />
@@ -197,20 +224,93 @@ function Action({
   );
 }
 
+
 function Home({
-  attendance,
+  home,
   changeAttendance,
   go,
 }: {
-  attendance: Attendance;
+  home: HomeData & {
+    loading: boolean;
+    saving: boolean;
+    error: string | null;
+    refresh: () => Promise<void>;
+  };
   changeAttendance: () => void;
   go: (tab: Tab) => void;
 }) {
+  const { P, s } = useThemeStyles();
   const [courtsOpen, setCourtsOpen] = useState(false);
 
+  const attendance = home.attendance;
+
   const attendingTitle =
-    attendance === 'going' ? "You're Attending" :
-      attendance === 'maybe' ? 'Maybe Attending' : 'Not Attending';
+    attendance === 'going'
+      ? "You're Attending"
+      : attendance === 'maybe'
+        ? 'Maybe Attending'
+        : attendance === 'not-going'
+          ? 'Not Attending'
+          : 'Attendance Not Set';
+
+  const displayName =
+    home.profile?.display_name?.trim() ||
+    home.profile?.full_name?.trim().split(' ')[0] ||
+    'Player';
+
+  const session = home.session;
+
+  const sessionDate = session
+    ? new Date(session.starts_at).toLocaleDateString('en-IE', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'short',
+    })
+    : '';
+
+  const sessionTime = session
+    ? `${new Date(session.starts_at).toLocaleTimeString('en-IE', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })}–${new Date(session.ends_at).toLocaleTimeString('en-IE', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })}`
+    : '';
+
+  const nextMatch = home.nextMatch;
+
+  const nextCourt = home.courts.find(
+    court => court.id === nextMatch?.court_id
+  );
+
+  const getTeamLabel = (team: 'A' | 'B') => {
+    if (!nextMatch) return '';
+
+    const players = home.matchPlayers.filter(
+      player =>
+        player.match_id === nextMatch.id &&
+        player.team === team
+    );
+
+    if (!players.length) return 'Players not assigned';
+
+    return players
+      .map(player => {
+        if (player.player_id === home.profile?.id) {
+          return 'You';
+        }
+        return 'Club player';
+      })
+      .join(' & ');
+  };
+
+  const activeMatches = home.matches.filter(
+    match => match.status === 'in_progress'
+  );
+
 
   return (
     <ScrollView
@@ -219,75 +319,18 @@ function Home({
       showsVerticalScrollIndicator={false}
     >
 
-      <View style={s.hero}>
-        <Image
-          source={PHOTO.hero}
-          resizeMode="cover"
-          style={s.positionedHeroImage}
-        />
+      <ClubHeader
 
-        <View
-          pointerEvents="none"
-          style={s.heroColorTint}
-        />
-
-
-
-
-        <LinearGradient
-          colors={[
-            'rgba(3, 27, 22, 0.48)',
-            'rgba(3, 27, 22, 0.12)',
-            'rgba(3, 27, 22, 0.18)',
-            'rgba(3, 27, 22, 0.58)',
-            'rgba(3, 27, 22, 0.88)',
-            P.bg,
-          ]}
-          locations={[0, 0.20, 0.40, 0.62, 0.82, 1]}
-          style={s.heroOverlay}
-        >
-
-
-          <View style={s.topBar}>
-            <View style={s.brand}>
-              <Shuttlecock size={36} color={P.white} />
-
-              <View>
-                <Text style={s.brandName}>Riverside</Text>
-                <Text style={s.brandName}>Badminton Club</Text>
-              </View>
-            </View>
-
-            <View style={s.headerRight}>
-              <Pressable
-                style={s.notification}
-                onPress={() => go('More')}
-              >
-                <I
-                  name="notifications-outline"
-                  size={24}
-                  color={P.white}
-                />
-                <View style={s.redDot} />
-              </Pressable>
-
-              <Pressable onPress={() => go('More')}>
-                <Avatar url={PHOTO.alex} size={43} />
-              </Pressable>
-            </View>
-          </View>
-
-          <View style={s.greeting}>
-            <Text style={s.hello}>
-              Hi <Text style={s.name}>Alex!</Text>
-            </Text>
-
-            <Text style={s.subHello}>
-              Ready for tonight?
-            </Text>
-          </View>
-        </LinearGradient>
-      </View>
+        title={`Hi ${displayName}!`}
+        highlight={`${displayName}!`}
+        subtitle={
+          session
+            ? 'Ready for your next club session?'
+            : 'Welcome to Riverside!'
+        }
+        onNotificationsPress={() => go('More')}
+        onProfilePress={() => go('More')}
+      />
 
 
       <View style={s.sections}>
@@ -296,8 +339,13 @@ function Home({
             <CircleIcon name="calendar" size={49} />
             <View style={s.attendanceText}>
               <Text style={s.attendanceTitle}>{attendingTitle}</Text>
-              <Text style={s.attendanceEvent}>Club Night</Text>
-              <Text style={s.secondary}>Tuesday · 19:00–21:00</Text>
+
+              <Text style={s.attendanceEvent}>
+                {session?.title ?? 'No upcoming club session'}
+              </Text>
+              <Text style={s.secondary}>
+                {session ? `${sessionDate} · ${sessionTime}` : 'Check back later'}
+              </Text>
             </View>
             <View style={[
               s.confirmCircle,
@@ -305,33 +353,114 @@ function Home({
               attendance === 'not-going' && { backgroundColor: '#61746D' },
             ]}>
               <I
-                name={attendance === 'going' ? 'checkmark' :
-                  attendance === 'maybe' ? 'help' : 'close'}
+                name={
+                  attendance === 'going'
+                    ? 'checkmark'
+                    : attendance === 'maybe'
+                      ? 'help'
+                      : attendance === 'not-going'
+                        ? 'close'
+                        : 'remove'
+                }
                 size={27}
               />
             </View>
           </View>
-          <Pressable style={s.attendanceButton} onPress={changeAttendance}>
-            <Text style={s.buttonText}>Change Attendance</Text>
+
+          <Pressable
+            style={[
+              s.attendanceButton,
+              (!session || home.saving) && { opacity: 0.45 },
+            ]}
+            disabled={!session || home.saving}
+            onPress={changeAttendance}
+          >
+            <Text style={s.buttonText}>
+              {home.saving ? 'Saving...' : 'Change Attendance'}
+            </Text>
             <I name="chevron-forward" size={21} />
           </Pressable>
         </Panel>
 
+
         <Panel>
           <View style={s.matchHeader}>
             <CircleIcon name="tennisball-outline" size={46} />
+
             <View style={s.matchHeaderText}>
               <Text style={s.matchTitle}>Next Match</Text>
-              <Text style={s.matchMeta}>Round 3 · Court 2</Text>
-              <Text style={s.secondary}>Upcoming match</Text>
+
+              <Text style={s.matchMeta}>
+                {nextMatch
+                  ? `Round ${nextMatch.round_number} · ${nextCourt?.name ?? 'Court pending'
+                  }`
+                  : 'No match assigned'}
+              </Text>
+
+              <Text style={s.secondary}>
+                {nextMatch
+                  ? nextMatch.status === 'in_progress'
+                    ? 'Match in progress'
+                    : 'Upcoming match'
+                  : 'Your next match will appear here'}
+              </Text>
             </View>
-            <View style={s.badge}>
-              <Text style={s.badgeText}>Doubles</Text>
-            </View>
+
+            {nextMatch && (
+              <View style={s.badge}>
+                <Text style={s.badgeText}>
+                  {nextMatch.match_type === 'doubles'
+                    ? 'Doubles'
+                    : 'Singles'}
+                </Text>
+              </View>
+            )}
           </View>
-          <MatchTeams />
-          <Pressable style={s.primaryButton} onPress={() => go('Matches')}>
-            <Text style={s.buttonText}>View Match</Text>
+
+          {nextMatch && (
+            <View style={{ marginTop: 16, marginBottom: 16 }}>
+              <Text
+                style={{
+                  color: P.white,
+                  textAlign: 'center',
+                  fontSize: 15,
+                  fontWeight: '700',
+                }}
+              >
+                {getTeamLabel('A')}
+              </Text>
+
+              <Text
+                style={{
+                  color: P.green,
+                  textAlign: 'center',
+                  marginVertical: 8,
+                  fontWeight: '800',
+                }}
+              >
+                VS
+              </Text>
+
+              <Text
+                style={{
+                  color: P.white,
+                  textAlign: 'center',
+                  fontSize: 15,
+                  fontWeight: '700',
+                }}
+              >
+                {getTeamLabel('B')}
+              </Text>
+            </View>
+          )}
+
+          <Pressable
+            style={s.primaryButton}
+            onPress={() => go('Matches')}
+          >
+            <Text style={s.buttonText}>
+              {nextMatch ? 'View Match' : 'View Matches'}
+            </Text>
             <I name="chevron-forward" size={21} />
           </Pressable>
         </Panel>
@@ -345,24 +474,65 @@ function Home({
             </Pressable>
           </View>
           <View style={s.stats}>
-            <Stat icon="people-outline" color={P.green} number="14" label="Attending" />
-            <Stat icon="grid-outline" color={P.blue} number="4" label="Courts" />
-            <Stat icon="tennisball-outline" color={P.purple} number="3" label="Round" />
-            <Stat icon="cafe-outline" color={P.orange} number="0" label="Resting" />
+
+            <Stat
+              icon="people-outline"
+              color={P.green}
+              number={String(home.attendingCount)}
+              label="Attending"
+            />
+            <Stat
+              icon="grid-outline"
+              color={P.blue}
+              number={String(home.courts.length)}
+              label="Courts"
+            />
+            <Stat
+              icon="tennisball-outline"
+              color={P.purple}
+              number={String(home.currentRound)}
+              label="Round"
+            />
+            <Stat
+              icon="cafe-outline"
+              color={P.orange}
+              number={String(home.restingCount)}
+              label="Resting"
+            />
           </View>
           {courtsOpen && (
             <View style={s.courtList}>
-              {COURTS.map(court => (
-                <View key={court.id} style={s.courtItem}>
-                  <View style={s.courtNumber}>
-                    <Text style={s.courtNumberText}>{court.id}</Text>
+
+              {home.courts.map(court => {
+                const match = activeMatches.find(
+                  item => item.court_id === court.id
+                );
+
+                return (
+                  <View key={court.id} style={s.courtItem}>
+                    <View style={s.courtNumber}>
+                      <Text style={s.courtNumberText}>
+                        {court.sort_order}
+                      </Text>
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.courtHeading}>
+                        {court.name}
+                      </Text>
+
+                      <Text style={s.courtDetail}>
+                        {match
+                          ? `Round ${match.round_number} · ${match.match_type === 'doubles'
+                            ? 'Doubles'
+                            : 'Singles'
+                          } · In progress`
+                          : 'Available'}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.courtHeading}>Court {court.id} · {court.kind}</Text>
-                    <Text style={s.courtDetail}>{court.a} vs {court.b}</Text>
-                  </View>
-                </View>
-              ))}
+                );
+              })}
             </View>
           )}
         </Panel>
@@ -376,7 +546,18 @@ function Home({
             <Action icon="trophy-outline" label="Leaderboard" onPress={() => go('Leaderboard')} />
           </View>
         </View>
-        <Text style={s.demo}>DEMONSTRATION DATA · DATABASE CONNECTION PENDING</Text>
+
+        {home.error ? (
+          <Pressable onPress={() => void home.refresh()}>
+            <Text style={[s.demo, { color: '#FF9B9B' }]}>
+              Database error: {home.error} · Tap to retry
+            </Text>
+          </Pressable>
+        ) : (
+          <Text style={s.demo}>
+            {home.loading ? 'LOADING CLUB DATA' : 'CONNECTED TO RIVERSIDE'}
+          </Text>
+        )}
       </View>
     </ScrollView>
   );
@@ -386,6 +567,7 @@ function OtherPage({ tab, go }: {
   tab: Tab;
   go: (tab: Tab) => void;
 }) {
+  const { P, s } = useThemeStyles();
   return (
     <ScrollView contentContainerStyle={s.otherPage}>
       <View style={s.otherTop}>
@@ -448,44 +630,108 @@ function OtherPage({ tab, go }: {
   );
 }
 
+
 function AttendancePicker({
   visible,
   value,
+  sessionTitle,
+  saving,
   choose,
   close,
 }: {
   visible: boolean;
   value: Attendance;
+  sessionTitle: string;
+  saving: boolean;
   choose: (value: Attendance) => void;
   close: () => void;
 }) {
-  const choices: { value: Attendance; label: string; icon: IconName }[] = [
-    { value: 'going', label: 'Going', icon: 'checkmark-circle-outline' },
-    { value: 'maybe', label: 'Maybe', icon: 'help-circle-outline' },
-    { value: 'not-going', label: 'Not Going', icon: 'close-circle-outline' },
-  ];
+  const { P, s } = useThemeStyles();
+  const choices: {
+    value: Attendance;
+    label: string;
+    icon: IconName;
+  }[] = [
+      {
+        value: 'going',
+        label: 'Going',
+        icon: 'checkmark-circle-outline',
+      },
+      {
+        value: 'maybe',
+        label: 'Maybe',
+        icon: 'help-circle-outline',
+      },
+      {
+        value: 'not-going',
+        label: 'Not Going',
+        icon: 'close-circle-outline',
+      },
+    ];
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={close}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={close}
+    >
       <View style={s.modalBackground}>
         <View style={s.modal}>
           <View style={s.modalTop}>
-            <Text style={s.detailTitle}>Change Attendance</Text>
-            <Pressable onPress={close}><I name="close" size={23} /></Pressable>
+            <Text style={s.detailTitle}>
+              Change Attendance
+            </Text>
+
+            <Pressable
+              disabled={saving}
+              onPress={close}
+            >
+              <I name="close" size={23} />
+            </Pressable>
           </View>
-          <Text style={s.secondary}>Club Night · Tuesday 19:00–21:00</Text>
+
+          <Text style={s.secondary}>
+            {sessionTitle}
+          </Text>
+
           {choices.map(item => (
             <Pressable
               key={item.value}
-              style={[s.choice, value === item.value && s.choiceSelected]}
-              onPress={() => { choose(item.value); close(); }}
+              disabled={saving}
+              style={[
+                s.choice,
+                value === item.value && s.choiceSelected,
+                saving && { opacity: 0.6 },
+              ]}
+              onPress={() => choose(item.value)}
             >
-              <I name={item.icon} color={value === item.value ? P.green : P.muted} />
-              <Text style={s.choiceText}>{item.label}</Text>
-              {value === item.value && <I name="checkmark" color={P.green} />}
+              <I
+                name={item.icon}
+                color={
+                  value === item.value
+                    ? P.green
+                    : P.muted
+                }
+              />
+
+              <Text style={s.choiceText}>
+                {item.label}
+              </Text>
+
+              {value === item.value && (
+                <I
+                  name="checkmark"
+                  color={P.green}
+                />
+              )}
             </Pressable>
           ))}
+
           <Text style={s.modalFootnote}>
-            This selection is temporary until database attendance is implemented.
+            {saving
+              ? 'Saving your attendance...'
+              : 'Your selection will be saved to Riverside.'}
           </Text>
         </View>
       </View>
@@ -493,19 +739,44 @@ function AttendancePicker({
   );
 }
 
-export default function RiversideApp() {
+function PlayerApp({ userId }: { userId: string }) {
+  const { P, s } = useThemeStyles();
   const [tab, setTab] = useState<Tab>('Home');
-  const [attendance, setAttendance] = useState<Attendance>('going');
+  const insets = useSafeAreaInsets();
   const [pickerOpen, setPickerOpen] = useState(false);
 
+  const home = useHomeData(userId);
+
+  const chooseAttendance = async (value: Attendance) => {
+    try {
+      await home.saveAttendance(value);
+      setPickerOpen(false);
+    } catch (error) {
+      Alert.alert(
+        'Unable to save attendance',
+        error instanceof Error
+          ? error.message
+          : 'Please try again.'
+      );
+    }
+  };
+
   return (
-    <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
+    <SafeAreaView style={s.safe} edges={['top']}>
       <StatusBar barStyle="light-content" />
 
-      <View style={s.content}>
+      <View
+        style={[
+          s.content,
+          {
+            paddingBottom:
+              60 + Math.max(0, insets.bottom - 14),
+          },
+        ]}
+      >
         {tab === 'Home' ? (
           <Home
-            attendance={attendance}
+            home={home}
             changeAttendance={() => setPickerOpen(true)}
             go={setTab}
           />
@@ -513,57 +784,60 @@ export default function RiversideApp() {
           <MatchesPage />
         ) : tab === 'Stats' ? (
           <StatsPage />
-        ) : tab === 'Leaderboard' ? ( 
+        ) : tab === 'Leaderboard' ? (
           <LeaderboardPage />
-        ) : tab === 'More' ? ( 
+        ) : tab === 'More' ? (
           <MorePage />
         ) : (
           <OtherPage tab={tab} go={setTab} />
         )}
       </View>
 
-      <View style={s.navigation}>
-        {NAV.map(item => {
-          const active = tab === item.label;
-          return (
-            <Pressable
-              key={item.label}
-              onPress={() => setTab(item.label)}
-              style={s.navButton}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: active }}
-            >
-              {active && <View style={s.navLine} />}
-              <I
-                name={active ? item.selected : item.icon}
-                size={23}
-                color={active ? P.green : '#B7C6BF'}
-              />
-              <Text style={[s.navText, active && { color: P.green }]}>
-                {item.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <ClubBottomNav
+        activeTab={tab}
+        onTabChange={setTab}
+      />
 
       <AttendancePicker
         visible={pickerOpen}
-        value={attendance}
-        choose={setAttendance}
-        close={() => setPickerOpen(false)}
+        value={home.attendance ?? 'not-going'}
+        choose={value => {
+          void chooseAttendance(value);
+        }}
+        close={() => {
+          if (!home.saving) setPickerOpen(false);
+        }}
+        sessionTitle={home.session?.title ?? 'Club Session'}
+        saving={home.saving}
       />
     </SafeAreaView>
   );
 }
 
-const s = StyleSheet.create({
+
+function useThemeStyles() {
+  const { theme } = useAppTheme();
+  const P = { ...BASE_COLORS,
+    bg: theme.background,
+    card: theme.surface,
+    tile: theme.tile,
+    border: theme.border,
+    green: theme.accent,
+    mint: theme.accentSoft,
+    white: theme.text,
+    muted: theme.muted,
+  };
+  const s = makeStyles(P);
+  return { P, s, theme };
+}
+
+const makeStyles = (P: typeof BASE_COLORS) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: P.bg },
   content: { flex: 1 },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 20 },
   heroColorTint: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 42, 32, 0.14)',
   },
   hero: {
@@ -806,3 +1080,68 @@ const s = StyleSheet.create({
   choiceText: { color: P.white, flex: 1, fontSize: 14 },
   modalFootnote: { color: P.muted, fontSize: 10, lineHeight: 15 },
 });
+
+
+export default function RiversideApp() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!mounted) return;
+
+      if (error) {
+        console.warn('Session restoration failed:', error.message);
+      }
+
+      setSession(data.session);
+      setAuthLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return;
+
+      setSession(nextSession);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  if (authLoading) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: P.bg,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+      >
+        <ActivityIndicator
+          size="large"
+          color="#00D995"
+        />
+      </View>
+    );
+  }
+
+  if (!session) {
+    return <AuthScreen />;
+  }
+
+  const userId = session.user.id;
+
+  return (
+    <AppThemeProvider userId={userId}>
+      <PlayerApp userId={userId} />
+    </AppThemeProvider>
+  );
+}
