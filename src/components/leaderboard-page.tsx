@@ -1,8 +1,8 @@
 import { useAppTheme } from '@/providers/theme-provider';
 
-import ClubHeader from '@/components/club-header';
 import { supabase } from '@/lib/supabase';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     useCallback,
     useEffect,
@@ -580,128 +580,77 @@ export default function LeaderboardPage() {
     const [selectedId, setSelectedId] =
         useState<string | null>(null);
 
-    const [players, setPlayers] =
-        useState<Player[]>([]);
+    const queryClient = useQueryClient();
+    const [userId, setUserId] = useState<string | null>(null);
 
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
-    const [error, setError] =
-        useState<string | null>(null);
+    useEffect(() => {
+        let active = true;
+        supabase.auth.getUser().then(({ data, error }) => {
+            if (!active) return;
+            if (error) console.warn('Riverside Leaderboard auth:', error.message);
+            setUserId(data.user?.id ?? null);
+        });
+        return () => { active = false; };
+    }, []);
 
-    const load = useCallback(async () => {
-        try {
-            const [
-                profilesResult,
-                matchesResult,
-                participantsResult,
-                sessionsResult,
-            ] = await Promise.all([
-                supabase
-                    .from('profiles')
-                    .select(
-                        'id, full_name, display_name, skill_level, avatar_url'
-                    ),
-
-                supabase
-                    .from('matches')
-                    .select(
-                        'id, session_id, status, team_a_score, team_b_score, created_at'
-                    )
-                    .eq('status', 'completed'),
-
-                supabase
-                    .from('match_players')
-                    .select('match_id, player_id, team'),
-
-                supabase
-                    .from('club_sessions')
-                    .select('id, starts_at'),
+    const queryKey = ['riverside', 'leaderboard', userId] as const;
+    const query = useQuery<Player[]>({
+        queryKey,
+        enabled: !!userId,
+        staleTime: 60_000,
+        queryFn: async () => {
+            // Fetch completed matches first, then request only their participants
+            // and session dates. Unrelated assignments no longer cross the wire.
+            const [profilesResult, matchesResult] = await Promise.all([
+                supabase.from('profiles').select('id, full_name, display_name, skill_level, avatar_url'),
+                supabase.from('matches').select('id, session_id, status, team_a_score, team_b_score, created_at').eq('status', 'completed'),
             ]);
+            if (profilesResult.error) throw profilesResult.error;
+            if (matchesResult.error) throw matchesResult.error;
 
-            if (profilesResult.error)
-                throw profilesResult.error;
+            const profiles = (profilesResult.data ?? []) as Profile[];
+            const matches = (matchesResult.data ?? []) as Match[];
+            if (!matches.length) return calculateLeaderboard(profiles, [], [], []);
 
-            if (matchesResult.error)
-                throw matchesResult.error;
-
-            if (participantsResult.error)
-                throw participantsResult.error;
-
-            if (sessionsResult.error)
-                throw sessionsResult.error;
-
-            const nextPlayers = calculateLeaderboard(
-                (profilesResult.data ?? []) as Profile[],
-                (matchesResult.data ?? []) as Match[],
+            const matchIds = matches.map(match => match.id);
+            const sessionIds = [...new Set(matches.map(match => match.session_id))];
+            const [participantsResult, sessionsResult] = await Promise.all([
+                supabase.from('match_players').select('match_id, player_id, team').in('match_id', matchIds),
+                supabase.from('club_sessions').select('id, starts_at').in('id', sessionIds),
+            ]);
+            if (participantsResult.error) throw participantsResult.error;
+            if (sessionsResult.error) throw sessionsResult.error;
+            return calculateLeaderboard(
+                profiles,
+                matches,
                 (participantsResult.data ?? []) as MatchPlayer[],
                 (sessionsResult.data ?? []) as Session[]
             );
+        },
+    });
 
-            setPlayers(nextPlayers);
-            setError(null);
-        } catch (err) {
-            setError(
-                err instanceof Error
-                    ? err.message
-                    : 'Unable to load leaderboard'
-            );
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    }, []);
+    const players = query.data ?? [];
+    const loading = !!userId && query.isPending;
+    const refreshing = query.isRefetching;
+    const error = query.error instanceof Error ? query.error.message : null;
+    const load = useCallback(async () => {
+        await query.refetch();
+    }, [query.refetch]);
 
     useEffect(() => {
-        void load();
-
-        const channel = supabase
-            .channel('riverside-leaderboard')
-            .on(
-                'postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'matches',
-                },
-                () => { void load(); }
-            )
-            .on(
-                'postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'match_players',
-                },
-                () => { void load(); }
-            )
-            .on(
-                'postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'profiles',
-                },
-                () => { void load(); }
-            )
-            .on(
-                'postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'club_sessions',
-                },
-                () => { void load(); }
-            )
-            .subscribe(status => {
-                if (status === 'SUBSCRIBED') {
-                    void load();
-                }
-            });
-
-        return () => {
-            void supabase.removeChannel(channel);
+        if (!userId) return;
+        const invalidate = () => {
+            void queryClient.invalidateQueries({ queryKey: ['riverside', 'leaderboard', userId], exact: true });
         };
-    }, [load]);
+        const channel = supabase.channel(
+            `riverside-leaderboard-${userId}-${Math.random().toString(36).slice(2)}`
+        );
+        for (const table of ['matches', 'match_players', 'profiles', 'club_sessions']) {
+            channel.on('postgres_changes', { event: '*', schema: 'public', table }, invalidate);
+        }
+        channel.subscribe();
+        return () => { void supabase.removeChannel(channel); };
+    }, [userId, queryClient]);
 
     const rankedPlayers = useMemo(() => {
         const sorted = [...players];
@@ -770,17 +719,11 @@ export default function LeaderboardPage() {
                         refreshing={refreshing}
                         tintColor={C.green}
                         onRefresh={() => {
-                            setRefreshing(true);
                             void load();
                         }}
                     />
                 }
             >
-                <ClubHeader
-                    title="Leaderboard"
-                    highlight="board"
-                    subtitle="See how all players are performing"
-                />
 
                 <View style={s.content}>
                     <View style={s.modeTabs}>

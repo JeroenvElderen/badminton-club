@@ -1,12 +1,12 @@
 
-import ClubHeader from '@/components/club-header';
 import { supabase } from '@/lib/supabase';
 import { THEMES, type ThemeId } from '@/lib/themes';
 import { useAppTheme } from '@/providers/theme-provider';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { decode } from 'base64-arraybuffer';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform,
   Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View,
@@ -136,70 +136,109 @@ export default function MorePage() {
   }
 
   const [selected, setSelected] = useState<MenuId | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [members, setMembers] = useState<Member[]>([]);
+  const queryClient = useQueryClient();
+  const [userId, setUserId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [prefs, setPrefs] = useState<Preferences>(defaults);
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [matchPlayers, setMatchPlayers] = useState<MatchPlayer[]>([]);
-  const [courtCount, setCourtCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState('');
+  const [contactSending, setContactSending] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const initializedFor = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const { data: userResult, error: authError } = await supabase.auth.getUser();
+  useEffect(() => {
+    let active = true;
+    void supabase.auth.getUser().then(({ data, error }) => {
+      if (!active) return;
+      if (error) console.warn('More auth:', error.message);
+      setUserId(data.user?.id ?? null);
+    });
+    return () => { active = false; };
+  }, []);
+
+  const queryKey = ['riverside', 'more', userId] as const;
+  const { data: account, isPending: loading, error: queryError, refetch } = useQuery({
+    queryKey,
+    enabled: !!userId,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
       if (authError) throw authError;
-      const user = userResult.user;
-      if (!user) throw new Error('Please sign in again.');
-      const [p, memberResult, matchResult, mpResult, courtResult] = await Promise.all([
+      const user = authData.user;
+      if (!user || user.id !== userId) throw new Error('Please sign in again.');
+      // Fetch the profile, member directory, completed matches and courts together.
+      // Participants are then limited to completed matches, rather than all history.
+      const [p, memberResult, matchResult, courtResult] = await Promise.all([
         supabase.from('profiles').select('id,full_name,display_name,date_of_birth,skill_level,avatar_url,notifications_enabled,dark_mode,language,created_at').eq('id', user.id).maybeSingle(),
         supabase.from('profiles').select('id,full_name,display_name,skill_level,avatar_url').order('full_name'),
         supabase.from('matches').select('id,status,team_a_score,team_b_score').eq('status', 'completed'),
-        supabase.from('match_players').select('match_id,player_id,team'),
         supabase.from('courts').select('id').eq('is_active', true),
       ]);
-      for (const result of [p, memberResult, matchResult, mpResult, courtResult]) {
+      for (const result of [p, memberResult, matchResult, courtResult]) {
         if (result.error) throw result.error;
       }
-      const current = (p.data ?? null) as Profile | null;
-      setProfile(current);
-      setMembers((memberResult.data ?? []) as Member[]);
-      setMatches((matchResult.data ?? []) as Match[]);
-      setMatchPlayers((mpResult.data ?? []) as MatchPlayer[]);
-      setCourtCount(courtResult.data?.length ?? 0);
-      setName(current?.display_name ?? current?.full_name ?? '');
-      setFullName(current?.full_name ?? '');
-      setEmail(user.email ?? '');
-      setPrefs(previous => ({ ...previous,
-        matchNotifications: current?.notifications_enabled ?? defaults.matchNotifications,
-        darkMode: current?.dark_mode ?? defaults.darkMode,
-        language: current?.language ?? defaults.language,
-      }));
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load account data');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+      const completedMatches = (matchResult.data ?? []) as Match[];
+      let completedParticipants: MatchPlayer[] = [];
+      if (completedMatches.length) {
+        const { data, error } = await supabase.from('match_players')
+          .select('match_id,player_id,team')
+          .in('match_id', completedMatches.map(match => match.id));
+        if (error) throw error;
+        completedParticipants = (data ?? []) as MatchPlayer[];
+      }
+      return {
+        profile: (p.data ?? null) as Profile | null,
+        members: (memberResult.data ?? []) as Member[],
+        matches: completedMatches,
+        matchPlayers: completedParticipants,
+        courtCount: courtResult.data?.length ?? 0,
+        email: user.email ?? '',
+      };
+    },
+  });
+  const profile = account?.profile ?? null;
+  const members = account?.members ?? [];
+  const matches = account?.matches ?? [];
+  const matchPlayers = account?.matchPlayers ?? [];
+  const courtCount = account?.courtCount ?? 0;
+  const error = queryError instanceof Error ? queryError.message : queryError ? 'Unable to load account data' : null;
+
+  // Initialize editable fields once per user, not on every Realtime refresh.
+  useEffect(() => {
+    if (!account || !userId || initializedFor.current === userId) return;
+    initializedFor.current = userId;
+    setName(account.profile?.display_name ?? account.profile?.full_name ?? '');
+    setFullName(account.profile?.full_name ?? '');
+    setEmail(account.email);
+    setPrefs(previous => ({ ...previous,
+      matchNotifications: account.profile?.notifications_enabled ?? defaults.matchNotifications,
+      darkMode: account.profile?.dark_mode ?? defaults.darkMode,
+      language: account.profile?.language ?? defaults.language,
+    }));
+  }, [account, userId]);
+
+  const load = useCallback(async () => {
+    await refetch();
+  }, [queryClient, userId, refetch]);
 
   useEffect(() => {
-    void load();
-    const channel = supabase.channel('riverside-more')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => { void load(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => { void load(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'match_players' }, () => { void load(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'courts' }, () => { void load(); })
+    if (!userId) return;
+    const channel = supabase.channel(`riverside-more-${userId}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => { void queryClient.invalidateQueries({ queryKey, exact: true }); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => { void queryClient.invalidateQueries({ queryKey, exact: true }); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'match_players' }, () => { void queryClient.invalidateQueries({ queryKey, exact: true }); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courts' }, () => { void queryClient.invalidateQueries({ queryKey, exact: true }); })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
-  }, [load]);
+  }, [userId, queryClient]);
+
+  const refreshMore = useCallback(async () => {
+    setRefreshing(true);
+    try { await refetch(); } finally { setRefreshing(false); }
+  }, [refetch]);
 
   const stats = useMemo(() => {
     if (!profile) return { matches: 0, wins: 0, winRate: 0, avgPoints: 0 };
@@ -259,10 +298,13 @@ export default function MorePage() {
         .eq('id', profile.id);
       if (updateError) throw updateError;
 
-      setProfile(previous => previous ? { ...previous, avatar_url: avatarUrl } : previous);
-      setMembers(previous => previous.map(member =>
-        member.id === profile.id ? { ...member, avatar_url: avatarUrl } : member
-      ));
+      queryClient.setQueryData<typeof account>(queryKey, previous => previous ? ({
+        ...previous,
+        profile: previous.profile ? { ...previous.profile, avatar_url: avatarUrl } : null,
+        members: previous.members.map(member => member.id === profile.id ? { ...member, avatar_url: avatarUrl } : member),
+      }) : previous);
+      void queryClient.invalidateQueries({ queryKey: ['riverside', 'home'] });
+      void queryClient.invalidateQueries({ queryKey: ['riverside', 'matches'] });
       Alert.alert('Photo Updated', 'Your new profile photo is now visible to club members.');
     } catch (err) {
       Alert.alert('Upload Failed', err instanceof Error ? err.message : 'Please try again.');
@@ -299,6 +341,7 @@ export default function MorePage() {
     if (!column) return;
     const { error: saveError } = await supabase.from('profiles').update({ [column]: value }).eq('id', profile.id);
     if (saveError) { setPrefs(prefs); Alert.alert('Save Failed', saveError.message); }
+    else void queryClient.invalidateQueries({ queryKey, exact: true });
   }
 
   function logout() {
@@ -314,9 +357,6 @@ export default function MorePage() {
   const currentName = displayName(profile);
   const skill = profile?.skill_level || 'Unrated';
   const item = SECTIONS.flatMap(section => section.items).find(entry => entry.id === selected);
-  const [message, setMessage] = useState('');
-  const [contactSending, setContactSending] = useState(false);
-
   async function sendContact() {
     if (!message.trim()) { Alert.alert('Message Required', 'Please enter your message.'); return; }
     if (!profile) return;
@@ -476,8 +516,7 @@ export default function MorePage() {
 
   return <View style={s.root}>
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scrollContent}
-      refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.green} onRefresh={() => { setRefreshing(true); void load(); }} />}>
-      <ClubHeader title="More" highlight="re" subtitle="Manage your account and app settings" />
+      refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.green} onRefresh={() => { void refreshMore(); }} />}>
       <View style={s.content}>
         {loading && <ActivityIndicator color={C.green} />}
         {!!error && <Pressable onPress={() => void load()} style={s.profileCard}><Text style={{ color: C.red }}>{error} · Tap to retry</Text></Pressable>}

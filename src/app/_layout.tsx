@@ -1,10 +1,10 @@
-
+import RiversideQueryProvider from '@/providers/query-provider';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 export default function RootLayout() {
   return (
-    <>
+    <RiversideQueryProvider>
       <Stack
         screenOptions={{
           headerShown: false,
@@ -14,6 +14,6 @@ export default function RootLayout() {
         }}
       />
       <StatusBar style="light" />
-    </>
+    </RiversideQueryProvider>
   );
 }

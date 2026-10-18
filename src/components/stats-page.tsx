@@ -1,30 +1,30 @@
 import { useAppTheme } from '@/providers/theme-provider';
 
-import ClubHeader from '@/components/club-header';
 import { supabase } from '@/lib/supabase';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import React, {
-    useCallback,
-    useEffect,
-    useMemo,
-    useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
 } from 'react';
 import {
-    ActivityIndicator,
-    Image,
-    Pressable,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Image,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import Svg, {
-    Circle,
-    Line,
-    Path,
-    Rect,
-    Text as SvgText,
+  Circle,
+  Line,
+  Path,
+  Rect,
+  Text as SvgText,
 } from 'react-native-svg';
 
 const BASE_COLORS = {
@@ -633,45 +633,25 @@ export default function StatsPage() {
   const [category, setCategory] =
     useState<Category>('Overview');
 
-  const [results, setResults] = useState<Result[]>([]);
-  const [names, setNames] = useState<
-    Record<string, PlayerInfo>
-  >({});
-  const [courts, setCourts] = useState<CourtRow[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
-
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     let active = true;
-
     supabase.auth.getUser().then(({ data, error }) => {
       if (!active) return;
-
-      if (error) {
-        setError(error.message);
-        setLoading(false);
-        return;
-      }
-
-      if (data.user) {
-        setUserId(data.user.id);
-      } else {
-        setLoading(false);
-      }
+      if (error) console.warn('Riverside Stats auth:', error.message);
+      setUserId(data.user?.id ?? null);
     });
-
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, []);
 
-  const load = useCallback(async () => {
-    if (!userId) return;
-
-    try {
+  const queryKey = ['riverside', 'stats', userId] as const;
+  const query = useQuery({
+    queryKey,
+    enabled: !!userId,
+    queryFn: async () => {
+      if (!userId) throw new Error('Not signed in');
       const { data: ownAssignments, error: ownError } =
         await supabase
           .from('match_players')
@@ -694,13 +674,10 @@ export default function StatsPage() {
 
       if (courtsResult.error) throw courtsResult.error;
 
-      setCourts((courtsResult.data ?? []) as CourtRow[]);
+      const courts = (courtsResult.data ?? []) as CourtRow[];
 
       if (!ids.length) {
-        setResults([]);
-        setNames({});
-        setError(null);
-        return;
+        return { results: [] as Result[], names: {} as Record<string, PlayerInfo>, courts };
       }
 
       const { data: matchRows, error: matchError } =
@@ -717,10 +694,7 @@ export default function StatsPage() {
       const completed = (matchRows ?? []) as MatchRow[];
 
       if (!completed.length) {
-        setResults([]);
-        setNames({});
-        setError(null);
-        return;
+        return { results: [] as Result[], names: {} as Record<string, PlayerInfo>, courts };
       }
 
       const sessionIds = [
@@ -841,90 +815,32 @@ export default function StatsPage() {
           new Date(b.date).getTime()
       );
 
-      setResults(calculated);
-      setNames(playerNames);
-      setError(null);
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : 'Unable to load statistics'
-      );
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [userId]);
+      return { results: calculated, names: playerNames, courts };
+    },
+  });
+
+  const results = query.data?.results ?? [];
+  const names = query.data?.names ?? {};
+  const courts = query.data?.courts ?? [];
+  const loading = !!userId && query.isPending;
+  const refreshing = query.isRefetching;
+  const error = query.error instanceof Error ? query.error.message : null;
+  const load = useCallback(async () => {
+    await query.refetch();
+  }, [query.refetch]);
 
   useEffect(() => {
     if (!userId) return;
-
-    void load();
-
-    const channel = supabase
-      .channel(`riverside-stats-${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'matches',
-        },
-        () => { void load(); }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'match_players',
-        },
-        () => { void load(); }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'club_sessions',
-        },
-        () => { void load(); }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'profiles',
-        },
-        () => { void load(); }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'session_attendance',
-        },
-        () => { void load(); }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'courts',
-        },
-        () => { void load(); }
-      )
-      .subscribe(status => {
-        if (status === 'SUBSCRIBED') void load();
-      });
-
-    return () => {
-      void supabase.removeChannel(channel);
+    const invalidate = () => {
+      void queryClient.invalidateQueries({ queryKey });
     };
-  }, [load, userId]);
+    const channel = supabase.channel(`riverside-stats-${userId}-${Math.random().toString(36).slice(2)}`);
+    for (const table of ['matches', 'match_players', 'club_sessions', 'profiles', 'courts']) {
+      channel.on('postgres_changes', { event: '*', schema: 'public', table }, invalidate);
+    }
+    channel.subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [userId, queryClient]);
 
   const filtered = useMemo(
     () => results.filter(r => matchesSeason(r, season)),
@@ -1031,18 +947,10 @@ export default function StatsPage() {
           <RefreshControl
             refreshing={refreshing}
             tintColor={C.green}
-            onRefresh={() => {
-              setRefreshing(true);
-              void load();
-            }}
+            onRefresh={() => { void load(); }}
           />
         }
       >
-        <ClubHeader
-          title="Statistics"
-          highlight="istics"
-          subtitle="Your live performance and club insights"
-        />
 
         <View style={s.content}>
           <View style={s.seasonArea}>

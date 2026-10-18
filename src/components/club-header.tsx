@@ -1,8 +1,10 @@
+import { fetchPlayerProfile, playerProfileKey } from '@/lib/player-profile-query';
 import { supabase } from '@/lib/supabase';
 import { useAppTheme } from '@/providers/theme-provider';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Image,
   ImageSourcePropType,
@@ -23,6 +25,8 @@ type ClubHeaderProps = {
   avatarSource?: ImageSourcePropType;
 };
 
+let nextHeaderInstanceId = 0;
+
 export default function ClubHeader({
   title,
   subtitle,
@@ -32,17 +36,17 @@ export default function ClubHeader({
   avatarSource,
 }: ClubHeaderProps) {
   const { theme } = useAppTheme();
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const channelInstanceId = useRef<number | null>(null);
+  if (channelInstanceId.current === null) channelInstanceId.current = ++nextHeaderInstanceId;
+  const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
 
-  const loadAvatar = useCallback(async (id: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('avatar_url')
-      .eq('id', id)
-      .maybeSingle();
-    if (!error) setAvatarUrl(data?.avatar_url ?? null);
-  }, []);
+  const profileQuery = useQuery({
+    queryKey: playerProfileKey(userId ?? ''),
+    queryFn: () => fetchPlayerProfile(userId!),
+    enabled: Boolean(userId),
+    staleTime: 60_000,
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -51,7 +55,6 @@ export default function ClubHeader({
     });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUserId(session?.user?.id ?? null);
-      if (!session?.user) setAvatarUrl(null);
     });
     return () => {
       mounted = false;
@@ -61,17 +64,16 @@ export default function ClubHeader({
 
   useEffect(() => {
     if (!userId) return;
-    void loadAvatar(userId);
     const channel = supabase
-      .channel(`riverside-header-avatar-${userId}`)
+      .channel(`riverside-header-avatar-${userId}-${channelInstanceId.current}`)
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
-        () => { void loadAvatar(userId); },
+        () => { void queryClient.invalidateQueries({ queryKey: playerProfileKey(userId), exact: true }); },
       )
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
-  }, [userId, loadAvatar]);
+  }, [userId, queryClient]);
 
   const rgb = [
     parseInt(theme.background.slice(1, 3), 16),
@@ -80,6 +82,7 @@ export default function ClubHeader({
   ].join(', ');
 
   const fade = (opacity: number) => `rgba(${rgb}, ${opacity})`;
+  const avatarUrl = profileQuery.data?.avatar_url ?? null;
   const displayAvatar: ImageSourcePropType | null = avatarSource ?? (avatarUrl ? { uri: avatarUrl } : null);
 
   function renderTitle() {
@@ -150,7 +153,14 @@ export default function ClubHeader({
 }
 
 const styles = StyleSheet.create({
-  container: { width: '100%', height: 224, backgroundColor: '#031B16', overflow: 'hidden' },
+  container: {
+  width: '100%',
+  height: 224,
+  backgroundColor: '#031B16',
+  overflow: 'hidden',
+  zIndex: 0,
+  elevation: 0,
+},
   backgroundImage: { position: 'absolute', width: '150%', height: '105%', top: 1, right: -40, opacity: 1 },
   colorTint: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,42,32,0.14)' },
   gradient: { flex: 1, paddingHorizontal: 19, justifyContent: 'space-between' },

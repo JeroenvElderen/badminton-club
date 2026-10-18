@@ -1,9 +1,9 @@
 import { useAppTheme } from '@/providers/theme-provider';
 
 import AttendancePage from '@/components/attendance-page';
-import ClubHeader from '@/components/club-header';
 import { supabase } from '@/lib/supabase';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
@@ -236,40 +236,7 @@ function MatchCard({
     );
 }
 
-export default function MatchesPage() {
-  const { C, s } = useThemeStyles();
-    const [section, setSection] = useState<Section>('Matches');
-    const [filter, setFilter] = useState<Filter>('Upcoming');
-    const [userId, setUserId] = useState<string | null>(null);
-    const [matches, setMatches] = useState<MatchView[]>([]);
-    const [selected, setSelected] = useState<MatchView | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        let active = true;
-
-        supabase.auth.getUser().then(({ data, error }) => {
-            if (!active) return;
-            if (error) {
-                setError(error.message);
-                setLoading(false);
-            } else {
-                setUserId(data.user?.id ?? null);
-                if (!data.user) setLoading(false);
-            }
-        });
-
-        return () => {
-            active = false;
-        };
-    }, []);
-
-    const load = useCallback(async () => {
-        if (!userId) return;
-
-        try {
+async function fetchMatches(userId: string): Promise<MatchView[]> {
             // Find matches assigned to this player.
             const { data: assignments, error: assignmentError } =
                 await supabase
@@ -282,9 +249,7 @@ export default function MatchesPage() {
             const ids = (assignments ?? []).map(a => a.match_id);
 
             if (!ids.length) {
-                setMatches([]);
-                setError(null);
-                return;
+                return [];
             }
 
             const { data: matchRows, error: matchError } =
@@ -301,9 +266,7 @@ export default function MatchesPage() {
             const rawMatches = (matchRows ?? []) as DBMatch[];
 
             if (!rawMatches.length) {
-                setMatches([]);
-                setError(null);
-                return;
+                return [];
             }
 
             const sessionIds = [
@@ -418,63 +381,57 @@ export default function MatchesPage() {
                     a.round_number - b.round_number
             );
 
-            setMatches(result);
-            setError(null);
-        } catch (e) {
-            setError(
-                e instanceof Error ? e.message : 'Unable to load matches'
-            );
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    }, [userId]);
+            return result;
+}
+
+export default function MatchesPage() {
+  const { C, s } = useThemeStyles();
+    const [section, setSection] = useState<Section>('Matches');
+    const [filter, setFilter] = useState<Filter>('Upcoming');
+    const [selected, setSelected] = useState<MatchView | null>(null);
+    const [userId, setUserId] = useState<string | null>(null);
+    const [authError, setAuthError] = useState<string | null>(null);
+    const queryClient = useQueryClient();
+    useEffect(() => {
+        let active = true;
+        supabase.auth.getUser().then(({ data, error }) => {
+            if (!active) return;
+            if (error) setAuthError(error.message);
+            else setUserId(data.user?.id ?? null);
+        });
+        return () => { active = false; };
+    }, []);
+
+    const queryKey = ['riverside', 'matches', userId] as const;
+    const query = useQuery({
+        queryKey,
+        queryFn: () => fetchMatches(userId!),
+        enabled: Boolean(userId),
+        staleTime: 60_000,
+        placeholderData: previous => previous,
+    });
+    const matches = query.data ?? [];
+    const loading = !authError && (!userId || query.isPending);
+    const refreshing = query.isRefetching;
+    const error = authError ?? (query.error instanceof Error ? query.error.message : query.error ? 'Unable to load matches' : null);
+    const load = useCallback(async () => {
+        if (!userId) return;
+        await queryClient.invalidateQueries({ queryKey });
+    }, [queryClient, userId]);
 
     useEffect(() => {
         if (!userId) return;
-
-        void load();
-
-        const channel = supabase
-            .channel(`riverside-matches-${userId}`)
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'matches' },
-                () => { void load(); }
-            )
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'match_players' },
-                () => { void load(); }
-            )
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'club_sessions' },
-                () => { void load(); }
-            )
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'courts' },
-                () => { void load(); }
-            )
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'session_attendance' },
-                () => { void load(); }
-            )
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'profiles' },
-                () => { void load(); }
-            )
-            .subscribe(status => {
-                if (status === 'SUBSCRIBED') void load();
+        const channel = supabase.channel(`riverside-matches-query-${userId}-${Math.random().toString(36).slice(2)}`);
+        for (const table of ['matches', 'match_players', 'club_sessions', 'courts', 'profiles']) {
+            channel.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+                void queryClient.invalidateQueries({ queryKey });
             });
-
-        return () => {
-            void supabase.removeChannel(channel);
-        };
-    }, [load, userId]);
+        }
+        channel.subscribe(status => {
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('Riverside Matches Realtime:', status);
+        });
+        return () => { void supabase.removeChannel(channel); };
+    }, [queryClient, userId]);
 
     const now = new Date();
 
@@ -532,17 +489,11 @@ export default function MatchesPage() {
                         refreshing={refreshing}
                         tintColor={C.green}
                         onRefresh={() => {
-                            setRefreshing(true);
                             void load();
                         }}
                     />
                 }
             >
-                <ClubHeader
-                    title="Matches"
-                    highlight="ches"
-                    subtitle="Your matches and club sessions"
-                />
 
                 <View style={s.content}>
                     <View style={s.mainSegment}>
@@ -761,7 +712,7 @@ const makeStyles = (C: typeof BASE_COLORS) => StyleSheet.create({
     scrollContent: { paddingBottom: 30 },
     content: {
         paddingHorizontal: 15,
-        marginTop: -4,
+        marginTop: 12,
         gap: 11,
     },
     mainSegment: {

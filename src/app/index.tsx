@@ -319,19 +319,6 @@ function Home({
       showsVerticalScrollIndicator={false}
     >
 
-      <ClubHeader
-
-        title={`Hi ${displayName}!`}
-        highlight={`${displayName}!`}
-        subtitle={
-          session
-            ? 'Ready for your next club session?'
-            : 'Welcome to Riverside!'
-        }
-        onNotificationsPress={() => go('More')}
-        onProfilePress={() => go('More')}
-      />
-
 
       <View style={s.sections}>
         <Panel>
@@ -742,10 +729,22 @@ function AttendancePicker({
 function PlayerApp({ userId }: { userId: string }) {
   const { P, s } = useThemeStyles();
   const [tab, setTab] = useState<Tab>('Home');
+  // Mount every main tab at login, keeping each mounted afterward.
+  // Hidden screens can finish their initial data requests in the background.
+  const navigateToTab = (nextTab: Tab) => setTab(nextTab);
   const insets = useSafeAreaInsets();
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const home = useHomeData(userId);
+  const headerName = home.profile?.display_name?.trim() ||
+    home.profile?.full_name?.trim().split(' ')[0] || 'Player';
+  const headerProps: Record<Tab, { title: string; subtitle: string; highlight: string }> = {
+    Home: { title: `Hi ${headerName}!`, highlight: `${headerName}!`, subtitle: home.session ? 'Ready for your next club session?' : 'Welcome to Riverside!' },
+    Matches: { title: 'Matches', highlight: 'ches', subtitle: 'Your matches and club sessions' },
+    Stats: { title: 'Statistics', highlight: 'istics', subtitle: 'Your live performance and club insights' },
+    Leaderboard: { title: 'Leaderboard', highlight: 'board', subtitle: 'See how all players are performing' },
+    More: { title: 'More', highlight: 're', subtitle: 'Manage your account and app settings' },
+  };
 
   const chooseAttendance = async (value: Attendance) => {
     try {
@@ -774,28 +773,40 @@ function PlayerApp({ userId }: { userId: string }) {
           },
         ]}
       >
-        {tab === 'Home' ? (
+      <View style={{ zIndex:-2, elevation: 0}}>
+        <ClubHeader
+          {...headerProps[tab]}
+          onNotificationsPress={() => navigateToTab('More')}
+          onProfilePress={() => navigateToTab('More')}
+        />
+        </View>
+
+        {/* Mount all main tabs immediately; hide inactive tabs without unmounting. */}
+        <View style={{ flex: 1, display: tab === 'Home' ? 'flex' : 'none' }}>
           <Home
             home={home}
             changeAttendance={() => setPickerOpen(true)}
-            go={setTab}
+            go={navigateToTab}
           />
-        ) : tab === 'Matches' ? (
-          <MatchesPage />
-        ) : tab === 'Stats' ? (
-          <StatsPage />
-        ) : tab === 'Leaderboard' ? (
-          <LeaderboardPage />
-        ) : tab === 'More' ? (
-          <MorePage />
-        ) : (
-          <OtherPage tab={tab} go={setTab} />
-        )}
+        </View>
+        <View style={{ flex: 1, display: tab === 'Matches' ? 'flex' : 'none' }}>
+            <MatchesPage />
+        </View>
+        <View style={{ flex: 1, display: tab === 'Stats' ? 'flex' : 'none' }}>
+            <StatsPage />
+        </View>
+        <View style={{ flex: 1, display: tab === 'Leaderboard' ? 'flex' : 'none' }}>
+            <LeaderboardPage />
+        </View>
+        <View style={{ flex: 1, display: tab === 'More' ? 'flex' : 'none' }}>
+            <MorePage />
+        </View>
+
       </View>
 
       <ClubBottomNav
         activeTab={tab}
-        onTabChange={setTab}
+        onTabChange={navigateToTab}
       />
 
       <AttendancePicker
