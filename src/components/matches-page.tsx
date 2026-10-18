@@ -712,7 +712,7 @@ const makeStyles = (C: typeof BASE_COLORS) => StyleSheet.create({
     scrollContent: { paddingBottom: 30 },
     content: {
         paddingHorizontal: 15,
-        marginTop: 12,
+        paddingTop: 0,
         gap: 11,
     },
     mainSegment: {

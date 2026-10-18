@@ -676,7 +676,7 @@ const makeStyles = (C: typeof BASE_COLORS) => StyleSheet.create({
     content: {
         paddingHorizontal: 12,
         gap: 18,
-        marginTop: -3,
+        paddingTop: 0,
     },
 
     /* PROFILE */

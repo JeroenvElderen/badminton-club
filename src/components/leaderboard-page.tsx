@@ -835,7 +835,7 @@ const makeStyles = (C: typeof BASE_COLORS) => StyleSheet.create({
     content: {
         paddingHorizontal: 12,
         gap: 10,
-        marginTop: -3,
+        paddingTop: 0,
     },
     modeTabs: {
         flexDirection: 'row',

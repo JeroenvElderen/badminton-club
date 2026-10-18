@@ -921,7 +921,7 @@ const makeStyles = (P: typeof BASE_COLORS) => StyleSheet.create({
     marginTop: 3,
   },
 
-  sections: { marginTop: -15, paddingHorizontal: 15, gap: 11 },
+  sections: { paddingTop: 0, paddingHorizontal: 15, gap: 11 },
   panel: {
     backgroundColor: P.card,
     borderColor: P.border, borderWidth: 1,
