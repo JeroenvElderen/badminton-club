@@ -10,8 +10,10 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 
 type Icon = React.ComponentProps<typeof Ionicons>['name'];
+type NavigationIcon = Icon | 'shuttlecock';
 const C = { bg: '#031B16', card: '#06251E', tile: '#102C27', border: '#185243', green: '#00D995', text: '#F6FBF8', muted: '#A6B8B1' };
 
 function Metric({ icon, value, label, color }: { icon: Icon; value: number; label: string; color: string }) {
@@ -32,9 +34,9 @@ export default function AdminHomePage({ userId, onSwitchToPlayer }: { userId: st
   const date = session ? new Date(session.starts_at).toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : 'No upcoming club night';
   const time = session ? `${new Date(session.starts_at).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit', hour12: false })} – ${new Date(session.ends_at).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit', hour12: false })}` : 'Not scheduled';
   const notReady = (feature: string) => Alert.alert(feature, 'This management workflow will be connected in the next admin development steps. No changes have been made.');
-  const tabs: { label: typeof section; icon: Icon }[] = [
+  const tabs: { label: typeof section; icon: NavigationIcon }[] = [
     { label: 'Home', icon: 'home-outline' }, { label: 'Nights', icon: 'calendar-outline' },
-    { label: 'Matches', icon: 'tennisball-outline' }, { label: 'Players', icon: 'people-outline' }, { label: 'More', icon: 'ellipsis-horizontal' },
+    { label: 'Matches', icon: 'shuttlecock' }, { label: 'Players', icon: 'people-outline' }, { label: 'More', icon: 'ellipsis-horizontal' },
   ];
   return <SafeAreaView style={[s.root, { backgroundColor: theme.background }]} edges={['top']}>
     <StatusBar barStyle="light-content" />
@@ -102,9 +104,33 @@ export default function AdminHomePage({ userId, onSwitchToPlayer }: { userId: st
         </> : <View style={s.panel}><Text style={s.heading}>{section}</Text><Text style={[s.subtle, { marginTop: 10 }]}>This admin section will be implemented next.</Text>{section === 'More' && <View style={{ gap: 16, marginTop: 20 }}><Pressable onPress={onSwitchToPlayer} style={{ backgroundColor: C.tile, borderWidth: 1, borderColor: C.green, padding: 16, borderRadius: 12 }}><Text style={{ color: C.green, fontWeight: '800' }}>⇄ Switch to Player Mode</Text></Pressable><Pressable onPress={() => void supabase.auth.signOut()}><Text style={{ color: C.green }}>Sign out</Text></Pressable></View>}</View>}
       </ScrollView>
     )}
-    <View style={[s.nav, { paddingBottom: Math.max(0, insets.bottom - 14) }]}>{tabs.map(item => <Pressable key={item.label} onPress={() => setSection(item.label)} style={s.navItem}><Ionicons name={item.icon} size={23} color={section === item.label ? C.green : C.text} /><Text style={[s.navLabel, section === item.label && { color: C.green }]}>{item.label}</Text></Pressable>)}</View>
+    <View style={[s.nav, { paddingBottom: Math.max(0, insets.bottom - 14) }]}>{tabs.map(item => {
+      const active = section === item.label;
+      const iconColor = active ? C.green : C.text;
+      return <Pressable key={item.label} onPress={() => setSection(item.label)} style={s.navItem}>
+        {item.icon === 'shuttlecock'
+          ? <ShuttlecockIcon size={23} color={iconColor} />
+          : <Ionicons name={item.icon} size={23} color={iconColor} />}
+        <Text style={[s.navLabel, active && { color: C.green }]}>{item.label}</Text>
+      </Pressable>;
+    })}</View>
   </SafeAreaView>;
 }
+
+function ShuttlecockIcon({ size, color }: { size: number; color: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M4.7 4.7C5.2 9.3 7.8 12.9 11.1 15.1M19.3 4.7C18.8 9.3 16.2 12.9 12.9 15.1M4.8 4.7C8.8 2.4 15.2 2.4 19.2 4.7M7.5 5.4l3.8 9.5M10.5 4.5l1.3 10.8M13.5 4.5l-1.3 10.8M16.5 5.4l-3.8 9.5M11.1 14.9l-1.2 4.2c-.3 1.5 4.2 1.5 4.2 0l-1.2-4.2"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 const s = StyleSheet.create({
   root: { flex: 1 }, content: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 28, gap: 12 },
   panel: { backgroundColor: C.card, borderWidth: 1, borderColor: C.border, borderRadius: 17, padding: 14, gap: 12 },

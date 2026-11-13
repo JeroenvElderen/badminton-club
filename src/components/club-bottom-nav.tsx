@@ -3,12 +3,13 @@ import { useAppTheme } from '@/providers/theme-provider';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React from 'react';
 import {
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 
 export type ClubTab =
   | 'Home'
@@ -18,11 +19,12 @@ export type ClubTab =
   | 'More';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
+type NavigationIconName = IconName | 'shuttlecock';
 
 type NavigationItem = {
   label: ClubTab;
-  icon: IconName;
-  selectedIcon: IconName;
+  icon: NavigationIconName;
+  selectedIcon: NavigationIconName;
 };
 
 type ClubBottomNavProps = {
@@ -38,8 +40,8 @@ const NAV_ITEMS: NavigationItem[] = [
   },
   {
     label: 'Matches',
-    icon: 'tennisball-outline',
-    selectedIcon: 'tennisball',
+    icon: 'shuttlecock',
+    selectedIcon: 'shuttlecock',
   },
   {
     label: 'Stats',
@@ -79,6 +81,8 @@ export default function ClubBottomNav({
       <View style={styles.navigation}>
         {NAV_ITEMS.map(item => {
           const active = activeTab === item.label;
+          const iconName = active ? item.selectedIcon : item.icon;
+          const iconColor = active ? theme.accent : theme.muted;
 
           return (
             <Pressable
@@ -103,19 +107,11 @@ export default function ClubBottomNav({
                 />
               )}
 
-              <Ionicons
-                name={
-                  active
-                    ? item.selectedIcon
-                    : item.icon
-                }
-                size={23}
-                color={
-                  active
-                    ? theme.accent
-                    : theme.muted
-                }
-              />
+              {iconName === 'shuttlecock' ? (
+                <ShuttlecockIcon size={23} color={iconColor} />
+              ) : (
+                <Ionicons name={iconName} size={23} color={iconColor} />
+              )}
 
               <Text
                 style={[
@@ -137,6 +133,20 @@ export default function ClubBottomNav({
         })}
       </View>
     </View>
+  );
+}
+
+function ShuttlecockIcon({ size, color }: { size: number; color: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M4.7 4.7C5.2 9.3 7.8 12.9 11.1 15.1M19.3 4.7C18.8 9.3 16.2 12.9 12.9 15.1M4.8 4.7C8.8 2.4 15.2 2.4 19.2 4.7M7.5 5.4l3.8 9.5M10.5 4.5l1.3 10.8M13.5 4.5l-1.3 10.8M16.5 5.4l-3.8 9.5M11.1 14.9l-1.2 4.2c-.3 1.5 4.2 1.5 4.2 0l-1.2-4.2"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
   );
 }
 
