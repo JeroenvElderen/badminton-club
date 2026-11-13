@@ -1,5 +1,6 @@
 
 import { supabase } from '@/lib/supabase';
+import { SKILL_LEVEL_OPTIONS } from '@/lib/skill-levels';
 import { THEMES, type ThemeId } from '@/lib/themes';
 import { useAppTheme } from '@/providers/theme-provider';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -44,7 +45,7 @@ const defaults: Preferences = {
 const SECTIONS: { title: string; items: MenuItem[] }[] = [
   { title: 'Club & Account', items: [
     { id: 'profile', title: 'My Profile', subtitle: 'View and edit\nyour details', icon: 'person-outline', color: C.green },
-    { id: 'skill', title: 'Skill Level', subtitle: 'Current level\nand history', icon: 'stats-chart-outline', color: C.blue },
+    { id: 'skill', title: 'League Division', subtitle: 'Current division\nand match history', icon: 'stats-chart-outline', color: C.blue },
     { id: 'members', title: 'Club Members', subtitle: 'View all players', icon: 'people-outline', color: C.purple },
     { id: 'club', title: 'Club Info', subtitle: 'About our club', icon: 'shield-outline', color: C.orange },
   ] },
@@ -141,6 +142,7 @@ export default function MorePage() {
   const [name, setName] = useState('');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
+  const [selectedSkillLevel, setSelectedSkillLevel] = useState('Unrated');
   const [prefs, setPrefs] = useState<Preferences>(defaults);
   const [saving, setSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -213,6 +215,7 @@ export default function MorePage() {
     setName(account.profile?.display_name ?? account.profile?.full_name ?? '');
     setFullName(account.profile?.full_name ?? '');
     setEmail(account.email);
+    setSelectedSkillLevel(account.profile?.skill_level ?? 'Unrated');
     setPrefs(previous => ({ ...previous,
       matchNotifications: account.profile?.notifications_enabled ?? defaults.matchNotifications,
       darkMode: account.profile?.dark_mode ?? defaults.darkMode,
@@ -332,6 +335,24 @@ export default function MorePage() {
     finally { setSaving(false); }
   }
 
+  async function saveSkillLevel() {
+    if (!profile || selectedSkillLevel === (profile.skill_level || 'Unrated')) return;
+    setSaving(true);
+    try {
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ skill_level: selectedSkillLevel })
+        .eq('id', profile.id);
+      if (updateError) throw updateError;
+      await queryClient.invalidateQueries({ queryKey: ['riverside'] });
+      Alert.alert('Division Updated', 'Your league division has been saved.');
+    } catch (err) {
+      Alert.alert('Save Failed', err instanceof Error ? err.message : 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function updatePreference(key: keyof Preferences, value: boolean | string) {
     const next = { ...prefs, [key]: value } as Preferences;
     setPrefs(next);
@@ -392,20 +413,44 @@ export default function MorePage() {
         <TextInput style={s.textField} value={fullName} onChangeText={setFullName} placeholder="Full name" placeholderTextColor={C.muted} />
         <Text style={s.fieldLabel}>Email Address</Text>
         <TextInput style={s.textField} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholderTextColor={C.muted} />
-        <Text style={s.helperText}>Email changes may require confirmation. Your skill level is read from your club profile.</Text>
+        <Text style={s.helperText}>Email changes may require confirmation. Update your league division from the League Division section.</Text>
         <Pressable style={s.actionButton} onPress={() => void saveProfile()} disabled={saving}>
           <Text style={s.actionButtonText}>{saving ? 'Saving...' : 'Save Profile'}</Text>
         </Pressable>
       </View>;
       case 'skill': return <View style={s.detailContent}>
         <View style={s.skillHero}><Ionicons name="stats-chart-outline" size={35} color={C.blue} />
-          <Text style={s.detailLarge}>{skill}</Text><Text style={s.mutedText}>Your current club skill level</Text>
+          <Text style={s.detailLarge}>{skill}</Text><Text style={s.mutedText}>Your current league division</Text>
         </View>
-        <InfoRow title="Current Level" value={skill} />
+        <Text style={s.fieldLabel}>Set your current league division</Text>
+        <View style={s.divisionOptions}>
+          {SKILL_LEVEL_OPTIONS.map(level => (
+            <Pressable
+              key={level}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: selectedSkillLevel === level }}
+              onPress={() => setSelectedSkillLevel(level)}
+              style={[s.divisionOption, selectedSkillLevel === level && s.divisionOptionSelected]}
+            >
+              <Text style={[s.divisionOptionText, selectedSkillLevel === level && { color: C.green }]}>
+                {level}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={s.helperText}>Choose the division you currently play in, or Unrated if you are not in a graded league. Divisions can vary between competitions.</Text>
+        <Pressable
+          style={[s.actionButton, (saving || selectedSkillLevel === skill) && { opacity: 0.55 }]}
+          onPress={() => void saveSkillLevel()}
+          disabled={saving || selectedSkillLevel === skill || !profile}
+        >
+          <Text style={s.actionButtonText}>{saving ? 'Saving...' : 'Save Division'}</Text>
+        </Pressable>
+        <InfoRow title="Current Division" value={skill} />
         <InfoRow title="Matches Played" value={String(stats.matches)} />
         <InfoRow title="Win Rate" value={`${stats.winRate}%`} />
         <InfoRow title="Avg. Points" value={stats.avgPoints.toFixed(1)} />
-        <Text style={s.helperText}>Performance is calculated from your completed matches. Skill level history is not recorded yet.</Text>
+        <Text style={s.helperText}>Match performance is calculated separately from your league division.</Text>
       </View>;
       case 'members': return <View style={s.detailContent}>
         <Text style={s.mutedText}>Riverside club players · {members.length} visible</Text>
@@ -429,7 +474,7 @@ export default function MorePage() {
         <SettingRow icon="tennisball-outline" title="Match Updates" subtitle="Saved notification preference" value={prefs.matchNotifications} onChange={v => void updatePreference('matchNotifications', v)} />
         <SettingRow icon="alarm-outline" title="Session Reminders" subtitle="Preference only; reminders not yet implemented" value={prefs.reminders} onChange={v => void updatePreference('reminders', v)} />
         <SettingRow icon="megaphone-outline" title="Club Announcements" subtitle="Preference only; delivery not yet implemented" value={prefs.clubNews} onChange={v => void updatePreference('clubNews', v)} />
-        <Text style={s.helperText}>Match Updates is saved in your Supabase profile. The other switches are local to this screen. Push notifications are not yet configured.</Text>
+        <Text style={s.helperText}>Match Updates controls in-app alerts for match assignments and completed results. Session Reminders and Club Announcements are saved only on this device for now. Push notifications are not configured yet.</Text>
       </View>;
       case 'appearance': return <View style={s.detailContent}>
         <Text style={s.detailSectionTitle}>Choose Your Theme</Text>
@@ -877,6 +922,32 @@ const makeStyles = (C: typeof BASE_COLORS) => StyleSheet.create({
     fieldLabel: {
         color: C.white,
         fontSize: 12,
+        fontWeight: '700',
+    },
+    divisionOptions: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+        gap: 8,
+    },
+    divisionOption: {
+        width: '31%',
+        minHeight: 42,
+        borderWidth: 1,
+        borderColor: C.border,
+        backgroundColor: C.card,
+        borderRadius: 10,
+        paddingHorizontal: 4,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    divisionOptionSelected: {
+        borderColor: C.green,
+        backgroundColor: '#064432',
+    },
+    divisionOptionText: {
+        color: C.white,
+        fontSize: 11,
         fontWeight: '700',
     },
 

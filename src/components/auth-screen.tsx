@@ -1,5 +1,6 @@
 
 import { supabase } from '@/lib/supabase';
+import { SKILL_LEVEL_OPTIONS } from '@/lib/skill-levels';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
@@ -130,7 +131,7 @@ export default function AuthScreen() {
 
   const [displayName, setDisplayName] = useState('');
   const [birthDate, setBirthDate] = useState('');
-  const [skillLevel, setSkillLevel] = useState('Beginner');
+  const [skillLevel, setSkillLevel] = useState('Unrated');
 
   const [notifications, setNotifications] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
@@ -623,11 +624,10 @@ export default function AuthScreen() {
                     placeholder="YYYY-MM-DD"
                   />
 
-                  <Text style={s.fieldLabel}>Skill level</Text>
+                  <Text style={s.fieldLabel}>Current league division</Text>
 
                   <View style={s.skillOptions}>
-                    {['Beginner', 'Intermediate', 'Advanced'].map(
-                      level => (
+                    {SKILL_LEVEL_OPTIONS.map(level => (
                         <Pressable
                           key={level}
                           onPress={() => setSkillLevel(level)}
@@ -647,9 +647,11 @@ export default function AuthScreen() {
                             {level}
                           </Text>
                         </Pressable>
-                      )
-                    )}
+                    ))}
                   </View>
+                  <Text style={s.skillHelp}>
+                    Choose your current league division, or Unrated if you do not play in a graded league.
+                  </Text>
 
                   <PrimaryButton
                     title="Continue"
@@ -940,16 +942,21 @@ const s = StyleSheet.create({
   },
   skillOptions: {
     flexDirection: 'row',
-    gap: 7,
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   skillOption: {
-    flex: 1,
+    width: '31%',
+    minHeight: 44,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.card,
-    paddingVertical: 13,
+    paddingHorizontal: 4,
+    paddingVertical: 10,
     borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   skillSelected: {
     borderColor: C.green,
@@ -957,8 +964,14 @@ const s = StyleSheet.create({
   },
   skillText: {
     color: C.white,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
+  },
+  skillHelp: {
+    color: C.muted,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: -7,
   },
   preference: {
     backgroundColor: 'rgba(22,50,43,0.92)',

@@ -1,15 +1,16 @@
-import AdminHomePage from '@/components/admin-home-page';
 import AuthScreen from '@/components/auth-screen';
+import AdminHomePage from '@/components/admin-home-page';
+import { useAdminAccess } from '@/hooks/use-admin-access';
 import ClubBottomNav, {
   type ClubTab,
 } from '@/components/club-bottom-nav';
 import ClubHeader from '@/components/club-header';
+import PlayerHomeScreen from '@/components/player-home-screen';
 import LeaderboardPage from '@/components/leaderboard-page';
 import MatchesPage from '@/components/matches-page';
 import MorePage from '@/components/more-page';
-import PlayerHomeScreen from '@/components/player-home-screen';
+import NotificationsCenter from '@/components/notifications-center';
 import StatsPage from '@/components/stats-page';
-import { useAdminAccess } from '@/hooks/use-admin-access';
 import { supabase } from '@/lib/supabase';
 import { AppThemeProvider, useAppTheme } from '@/providers/theme-provider';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -289,7 +290,7 @@ function OtherPage({ tab, go }: {
           <>
             <Text style={s.detailTitle}>Club Leaderboard</Text>
             <Text style={s.description}>
-              Rankings will be calculated from verified match results and skill ratings.
+              Rankings will be calculated from verified match results and league divisions.
             </Text>
           </>
         ) : (
@@ -343,6 +344,7 @@ function RoleRouter({ userId }: { userId: string }) {
 function PlayerApp({ userId, onSwitchToAdmin }: { userId: string; onSwitchToAdmin?: () => void }) {
   const { P, s } = useThemeStyles();
   const [tab, setTab] = useState<Tab>('Home');
+  const [notificationsVisible, setNotificationsVisible] = useState(false);
   // Mount every main tab at login, keeping each mounted afterward.
   // Hidden screens can finish their initial data requests in the background.
   const navigateToTab = (nextTab: Tab) => setTab(nextTab);
@@ -352,7 +354,7 @@ function PlayerApp({ userId, onSwitchToAdmin }: { userId: string; onSwitchToAdmi
   const headerName = home.profile?.display_name?.trim() ||
     home.profile?.full_name?.trim().split(' ')[0] || 'Player';
   const headerProps: Record<Tab, { title: string; subtitle: string; highlight: string }> = {
-    Home: { title: `Hi ${headerName}!`, highlight: `${headerName}!`, subtitle: home.session?.status === 'active' ? 'Club night is live · check your match below' : home.session ? 'Ready for your next club session?' : 'Welcome to Riverside!' },
+    Home: { title: `Hi ${headerName}!`, highlight: `${headerName}!`, subtitle: home.session ? 'Ready for your next club session?' : 'Welcome to Riverside!' },
     Matches: { title: 'Matches', highlight: 'ches', subtitle: 'Your matches and club sessions' },
     Stats: { title: 'Statistics', highlight: 'istics', subtitle: 'Your live performance and club insights' },
     Leaderboard: { title: 'Leaderboard', highlight: 'board', subtitle: 'See how all players are performing' },
@@ -388,7 +390,7 @@ function PlayerApp({ userId, onSwitchToAdmin }: { userId: string; onSwitchToAdmi
       <View style={{ zIndex:-2, elevation: 0}}>
         <ClubHeader
           {...headerProps[tab]}
-          onNotificationsPress={() => navigateToTab('More')}
+          onNotificationsPress={() => setNotificationsVisible(true)}
           onProfilePress={() => navigateToTab('More')}
         />
         </View>
@@ -420,6 +422,13 @@ function PlayerApp({ userId, onSwitchToAdmin }: { userId: string; onSwitchToAdmi
       <ClubBottomNav
         activeTab={tab}
         onTabChange={navigateToTab}
+      />
+
+      <NotificationsCenter
+        userId={userId}
+        visible={notificationsVisible}
+        onClose={() => setNotificationsVisible(false)}
+        onOpenMatches={() => navigateToTab('Matches')}
       />
 
     </SafeAreaView>

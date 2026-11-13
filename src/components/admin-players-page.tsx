@@ -234,7 +234,7 @@ function PlayerRow({
     );
 }
 
-export default function AdminPlayersPage() {
+export default function AdminPlayersPage({ onNotificationsPress }: { onNotificationsPress: () => void }) {
     const [profiles, setProfiles] = useState<Profile[]>([]);
     const [matches, setMatches] = useState<Match[]>([]);
     const [participants, setParticipants] = useState<MatchPlayer[]>([]);
@@ -474,12 +474,7 @@ export default function AdminPlayersPage() {
             <ClubHeader
                 title="Players"
                 subtitle="Manage club members and player information."
-                onNotificationsPress={() =>
-                    Alert.alert(
-                        'Notifications',
-                        'Notifications will be connected in a later step.'
-                    )
-                }
+                onNotificationsPress={onNotificationsPress}
                 onProfilePress={() =>
                     Alert.alert(
                         'Admin Profile',
@@ -793,7 +788,7 @@ export default function AdminPlayersPage() {
 
                                 <Text style={s.detailsSkill}>
                                     {selected.skill ??
-                                        'Skill level not set'}
+                                        'League division not set'}
                                 </Text>
 
                                 <View style={s.detailsStats}>
@@ -842,7 +837,7 @@ export default function AdminPlayersPage() {
                                 </View>
 
                                 <Text style={s.detailsNote}>
-                                    Player editing, skill-level management,
+                                    Player editing, league-division management,
                                     and account activation will be added
                                     in the next development step.
                                 </Text>

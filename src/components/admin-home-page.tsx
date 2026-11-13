@@ -3,14 +3,15 @@ import AdminMorePage from '@/components/admin-more-page';
 import AdminNightsPage from '@/components/admin-nights-page';
 import AdminPlayersPage from '@/components/admin-players-page';
 import ClubHeader from '@/components/club-header';
+import NotificationsCenter from '@/components/notifications-center';
 import { useHomeData } from '@/hooks/use-home-data';
 import { supabase } from '@/lib/supabase';
 import { useAppTheme } from '@/providers/theme-provider';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Icon = React.ComponentProps<typeof Ionicons>['name'];
 type NavigationIcon = Icon | 'shuttlecock';
@@ -26,6 +27,7 @@ export default function AdminHomePage({ userId, onSwitchToPlayer }: { userId: st
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
   const home = useHomeData(userId);
+  const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [section, setSection] = useState<'Home' | 'Nights' | 'Matches' | 'Players' | 'More'>('Home');
   const session = home.session;
   const current = home.matches.filter(m => m.status === 'in_progress');
@@ -53,7 +55,7 @@ export default function AdminHomePage({ userId, onSwitchToPlayer }: { userId: st
                 ? 'Manage your club and settings.'
                 : 'Riverside administration'
         }
-        onNotificationsPress={() => notReady('Notifications')}
+        onNotificationsPress={() => setNotificationsVisible(true)}
         onProfilePress={() => setSection('More')}
       />
     )}
@@ -62,7 +64,7 @@ export default function AdminHomePage({ userId, onSwitchToPlayer }: { userId: st
     ) : section === 'Matches' ? (
       <AdminMatchesPage userId={userId} />
     ) : section === 'Players' ? (
-      <AdminPlayersPage />
+      <AdminPlayersPage onNotificationsPress={() => setNotificationsVisible(true)} />
     ) : section === 'More' ? (
       <AdminMorePage onSwitchToPlayer={onSwitchToPlayer} />
     ) : (
@@ -114,6 +116,12 @@ export default function AdminHomePage({ userId, onSwitchToPlayer }: { userId: st
         <Text style={[s.navLabel, active && { color: C.green }]}>{item.label}</Text>
       </Pressable>;
     })}</View>
+    <NotificationsCenter
+      userId={userId}
+      visible={notificationsVisible}
+      onClose={() => setNotificationsVisible(false)}
+      onOpenMatches={() => setSection('Matches')}
+    />
   </SafeAreaView>;
 }
 

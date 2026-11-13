@@ -1,4 +1,5 @@
 import { fetchPlayerProfile, playerProfileKey } from '@/lib/player-profile-query';
+import { useNotifications } from '@/hooks/use-notifications';
 import { supabase } from '@/lib/supabase';
 import { useAppTheme } from '@/providers/theme-provider';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -47,6 +48,7 @@ export default function ClubHeader({
     enabled: Boolean(userId),
     staleTime: 60_000,
   });
+  const { unreadCount } = useNotifications(userId);
 
   useEffect(() => {
     let mounted = true;
@@ -117,10 +119,14 @@ export default function ClubHeader({
               style={styles.notificationButton}
               onPress={onNotificationsPress}
               accessibilityRole="button"
-              accessibilityLabel="Notifications"
+              accessibilityLabel={unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'}
             >
               <Ionicons name="notifications-outline" size={24} color={theme.text} />
-              <View style={styles.notificationDot} />
+              {unreadCount > 0 && (
+                <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                </View>
+              )}
             </Pressable>
             <Pressable
               onPress={onProfilePress}
@@ -170,7 +176,8 @@ const styles = StyleSheet.create({
   brandName: { color: '#F6FBF8', fontSize: 14, fontWeight: '700', lineHeight: 19, letterSpacing: 0.1 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 17 },
   notificationButton: { position: 'relative', padding: 4 },
-  notificationDot: { position: 'absolute', right: 2, top: 2, width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF4C59' },
+  notificationBadge: { position: 'absolute', right: -4, top: -4, minWidth: 15, height: 15, paddingHorizontal: 3, borderRadius: 8, backgroundColor: '#FF4C59', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#031B16' },
+  notificationBadgeText: { color: '#FFFFFF', fontSize: 8, lineHeight: 10, fontWeight: '800' },
   avatar: { width: 43, height: 43, borderRadius: 21.5, borderWidth: 2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarImage: { width: '100%', height: '100%' },
   heading: { paddingBottom: 45 },

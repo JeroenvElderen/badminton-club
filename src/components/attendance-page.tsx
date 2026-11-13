@@ -1,6 +1,7 @@
 import { useAppTheme } from '@/providers/theme-provider';
 
 import { supabase } from '@/lib/supabase';
+import { getSkillLevelOrder } from '@/lib/skill-levels';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -30,7 +31,7 @@ const C = BASE_COLORS;
 
 
 type Status = 'Attending' | 'Maybe' | 'Not Attending';
-type Sort = 'Name A-Z' | 'Name Z-A' | 'Skill Level';
+type Sort = 'Name A-Z' | 'Name Z-A' | 'League Division';
 type DBStatus = 'going' | 'maybe' | 'not-going';
 
 type Player = {
@@ -58,7 +59,7 @@ const STATUSES: Status[] = [
 const SORTS: Sort[] = [
     'Name A-Z',
     'Name Z-A',
-    'Skill Level',
+    'League Division',
 ];
 
 const ICONS = {
@@ -71,12 +72,6 @@ const COLORS = {
     Attending: C.green,
     Maybe: C.blue,
     'Not Attending': C.red,
-};
-
-const SKILL_ORDER: Record<string, number> = {
-    Advanced: 3,
-    Intermediate: 2,
-    Beginner: 1,
 };
 
 function toStatus(value: string): Status {
@@ -344,10 +339,10 @@ export default function AttendancePage() {
                     return b.name.localeCompare(a.name);
                 }
 
-                if (sort === 'Skill Level') {
+                if (sort === 'League Division') {
                     return (
-                        (SKILL_ORDER[b.level] ?? 0) -
-                        (SKILL_ORDER[a.level] ?? 0)
+                        getSkillLevelOrder(b.level) -
+                        getSkillLevelOrder(a.level)
                     );
                 }
 
