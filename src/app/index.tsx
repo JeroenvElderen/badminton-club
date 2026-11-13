@@ -1,6 +1,5 @@
-import AuthScreen from '@/components/auth-screen';
 import AdminHomePage from '@/components/admin-home-page';
-import { useAdminAccess } from '@/hooks/use-admin-access';
+import AuthScreen from '@/components/auth-screen';
 import ClubBottomNav, {
   type ClubTab,
 } from '@/components/club-bottom-nav';
@@ -8,7 +7,9 @@ import ClubHeader from '@/components/club-header';
 import LeaderboardPage from '@/components/leaderboard-page';
 import MatchesPage from '@/components/matches-page';
 import MorePage from '@/components/more-page';
+import PlayerHomeScreen from '@/components/player-home-screen';
 import StatsPage from '@/components/stats-page';
+import { useAdminAccess } from '@/hooks/use-admin-access';
 import { supabase } from '@/lib/supabase';
 import { AppThemeProvider, useAppTheme } from '@/providers/theme-provider';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -17,7 +18,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  Modal,
   Pressable,
   ScrollView,
   StatusBar,
@@ -238,317 +238,15 @@ function Home({
     error: string | null;
     refresh: () => Promise<void>;
   };
-  changeAttendance: () => void;
+  changeAttendance: (value: Attendance) => void;
   go: (tab: Tab) => void;
 }) {
-  const { P, s } = useThemeStyles();
-  const [courtsOpen, setCourtsOpen] = useState(false);
-
-  const attendance = home.attendance;
-
-  const attendingTitle =
-    attendance === 'going'
-      ? "You're Attending"
-      : attendance === 'maybe'
-        ? 'Maybe Attending'
-        : attendance === 'not-going'
-          ? 'Not Attending'
-          : 'Attendance Not Set';
-
-  const displayName =
-    home.profile?.display_name?.trim() ||
-    home.profile?.full_name?.trim().split(' ')[0] ||
-    'Player';
-
-  const session = home.session;
-
-  const sessionDate = session
-    ? new Date(session.starts_at).toLocaleDateString('en-IE', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'short',
-    })
-    : '';
-
-  const sessionTime = session
-    ? `${new Date(session.starts_at).toLocaleTimeString('en-IE', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    })}–${new Date(session.ends_at).toLocaleTimeString('en-IE', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    })}`
-    : '';
-
-  const nextMatch = home.nextMatch;
-
-  const nextCourt = home.courts.find(
-    court => court.id === nextMatch?.court_id
-  );
-
-  const getTeamLabel = (team: 'A' | 'B') => {
-    if (!nextMatch) return '';
-
-    const players = home.matchPlayers.filter(
-      player =>
-        player.match_id === nextMatch.id &&
-        player.team === team
-    );
-
-    if (!players.length) return 'Players not assigned';
-
-    return players
-      .map(player => {
-        if (player.player_id === home.profile?.id) {
-          return 'You';
-        }
-        return 'Club player';
-      })
-      .join(' & ');
-  };
-
-  const activeMatches = home.matches.filter(
-    match => match.status === 'in_progress'
-  );
-
-
   return (
-    <ScrollView
-      style={s.scroll}
-      contentContainerStyle={s.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
-
-
-      <View style={s.sections}>
-        <Panel>
-          <View style={s.attendanceRow}>
-            <CircleIcon name="calendar" size={49} />
-            <View style={s.attendanceText}>
-              <Text style={s.attendanceTitle}>{attendingTitle}</Text>
-
-              <Text style={s.attendanceEvent}>
-                {session?.title ?? 'No upcoming club session'}
-              </Text>
-              <Text style={s.secondary}>
-                {session ? `${sessionDate} · ${sessionTime}` : 'Check back later'}
-              </Text>
-            </View>
-            <View style={[
-              s.confirmCircle,
-              attendance === 'maybe' && { backgroundColor: P.orange },
-              attendance === 'not-going' && { backgroundColor: '#61746D' },
-            ]}>
-              <I
-                name={
-                  attendance === 'going'
-                    ? 'checkmark'
-                    : attendance === 'maybe'
-                      ? 'help'
-                      : attendance === 'not-going'
-                        ? 'close'
-                        : 'remove'
-                }
-                size={27}
-              />
-            </View>
-          </View>
-
-          <Pressable
-            style={[
-              s.attendanceButton,
-              (!session || home.saving) && { opacity: 0.45 },
-            ]}
-            disabled={!session || home.saving}
-            onPress={changeAttendance}
-          >
-            <Text style={s.buttonText}>
-              {home.saving ? 'Saving...' : 'Change Attendance'}
-            </Text>
-            <I name="chevron-forward" size={21} />
-          </Pressable>
-        </Panel>
-
-
-        <Panel>
-          <View style={s.matchHeader}>
-            <CircleIcon name="tennisball-outline" size={46} />
-
-            <View style={s.matchHeaderText}>
-              <Text style={s.matchTitle}>Next Match</Text>
-
-              <Text style={s.matchMeta}>
-                {nextMatch
-                  ? `Round ${nextMatch.round_number} · ${nextCourt?.name ?? 'Court pending'
-                  }`
-                  : 'No match assigned'}
-              </Text>
-
-              <Text style={s.secondary}>
-                {nextMatch
-                  ? nextMatch.status === 'in_progress'
-                    ? 'Match in progress'
-                    : 'Upcoming match'
-                  : 'Your next match will appear here'}
-              </Text>
-            </View>
-
-            {nextMatch && (
-              <View style={s.badge}>
-                <Text style={s.badgeText}>
-                  {nextMatch.match_type === 'doubles'
-                    ? 'Doubles'
-                    : 'Singles'}
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {nextMatch && (
-            <View style={{ marginTop: 16, marginBottom: 16 }}>
-              <Text
-                style={{
-                  color: P.white,
-                  textAlign: 'center',
-                  fontSize: 15,
-                  fontWeight: '700',
-                }}
-              >
-                {getTeamLabel('A')}
-              </Text>
-
-              <Text
-                style={{
-                  color: P.green,
-                  textAlign: 'center',
-                  marginVertical: 8,
-                  fontWeight: '800',
-                }}
-              >
-                VS
-              </Text>
-
-              <Text
-                style={{
-                  color: P.white,
-                  textAlign: 'center',
-                  fontSize: 15,
-                  fontWeight: '700',
-                }}
-              >
-                {getTeamLabel('B')}
-              </Text>
-            </View>
-          )}
-
-          <Pressable
-            style={s.primaryButton}
-            onPress={() => go('Matches')}
-          >
-            <Text style={s.buttonText}>
-              {nextMatch ? 'View Match' : 'View Matches'}
-            </Text>
-            <I name="chevron-forward" size={21} />
-          </Pressable>
-        </Panel>
-
-        <Panel style={s.overview}>
-          <View style={s.sectionHeading}>
-            <Text style={s.sectionTitle}>Tonight's Overview</Text>
-            <Pressable style={s.viewAll} onPress={() => setCourtsOpen(!courtsOpen)}>
-              <Text style={s.viewAllText}>{courtsOpen ? 'Hide' : 'View All'}</Text>
-              <I name="chevron-forward" size={17} color={P.green} />
-            </Pressable>
-          </View>
-          <View style={s.stats}>
-
-            <Stat
-              icon="people-outline"
-              color={P.green}
-              number={String(home.attendingCount)}
-              label="Attending"
-            />
-            <Stat
-              icon="grid-outline"
-              color={P.blue}
-              number={String(home.courts.length)}
-              label="Courts"
-            />
-            <Stat
-              icon="tennisball-outline"
-              color={P.purple}
-              number={String(home.currentRound)}
-              label="Round"
-            />
-            <Stat
-              icon="cafe-outline"
-              color={P.orange}
-              number={String(home.restingCount)}
-              label="Resting"
-            />
-          </View>
-          {courtsOpen && (
-            <View style={s.courtList}>
-
-              {home.courts.map(court => {
-                const match = activeMatches.find(
-                  item => item.court_id === court.id
-                );
-
-                return (
-                  <View key={court.id} style={s.courtItem}>
-                    <View style={s.courtNumber}>
-                      <Text style={s.courtNumberText}>
-                        {court.sort_order}
-                      </Text>
-                    </View>
-
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.courtHeading}>
-                        {court.name}
-                      </Text>
-
-                      <Text style={s.courtDetail}>
-                        {match
-                          ? `Round ${match.round_number} · ${match.match_type === 'doubles'
-                            ? 'Doubles'
-                            : 'Singles'
-                          } · In progress`
-                          : 'Available'}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-        </Panel>
-
-        <View style={s.quickPanel}>
-          <Text style={s.sectionTitle}>Quick Actions</Text>
-          <View style={s.actions}>
-            <Action icon="calendar-outline" label="My Matches" onPress={() => go('Matches')} />
-            <Action icon="bar-chart-outline" label="Live Scores" onPress={() => go('Matches')} />
-            <Action icon="stats-chart-outline" label="My Statistics" onPress={() => go('Stats')} />
-            <Action icon="trophy-outline" label="Leaderboard" onPress={() => go('Leaderboard')} />
-          </View>
-        </View>
-
-        {home.error ? (
-          <Pressable onPress={() => void home.refresh()}>
-            <Text style={[s.demo, { color: '#FF9B9B' }]}>
-              Database error: {home.error} · Tap to retry
-            </Text>
-          </Pressable>
-        ) : (
-          <Text style={s.demo}>
-            {home.loading ? 'LOADING CLUB DATA' : 'CONNECTED TO RIVERSIDE'}
-          </Text>
-        )}
-      </View>
-    </ScrollView>
+    <PlayerHomeScreen
+      home={home}
+      onAttendanceChange={changeAttendance}
+      onOpenMatches={() => go('Matches')}
+    />
   );
 }
 
@@ -620,114 +318,6 @@ function OtherPage({ tab, go }: {
 }
 
 
-function AttendancePicker({
-  visible,
-  value,
-  sessionTitle,
-  saving,
-  choose,
-  close,
-}: {
-  visible: boolean;
-  value: Attendance;
-  sessionTitle: string;
-  saving: boolean;
-  choose: (value: Attendance) => void;
-  close: () => void;
-}) {
-  const { P, s } = useThemeStyles();
-  const choices: {
-    value: Attendance;
-    label: string;
-    icon: IconName;
-  }[] = [
-      {
-        value: 'going',
-        label: 'Going',
-        icon: 'checkmark-circle-outline',
-      },
-      {
-        value: 'maybe',
-        label: 'Maybe',
-        icon: 'help-circle-outline',
-      },
-      {
-        value: 'not-going',
-        label: 'Not Going',
-        icon: 'close-circle-outline',
-      },
-    ];
-
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={close}
-    >
-      <View style={s.modalBackground}>
-        <View style={s.modal}>
-          <View style={s.modalTop}>
-            <Text style={s.detailTitle}>
-              Change Attendance
-            </Text>
-
-            <Pressable
-              disabled={saving}
-              onPress={close}
-            >
-              <I name="close" size={23} />
-            </Pressable>
-          </View>
-
-          <Text style={s.secondary}>
-            {sessionTitle}
-          </Text>
-
-          {choices.map(item => (
-            <Pressable
-              key={item.value}
-              disabled={saving}
-              style={[
-                s.choice,
-                value === item.value && s.choiceSelected,
-                saving && { opacity: 0.6 },
-              ]}
-              onPress={() => choose(item.value)}
-            >
-              <I
-                name={item.icon}
-                color={
-                  value === item.value
-                    ? P.green
-                    : P.muted
-                }
-              />
-
-              <Text style={s.choiceText}>
-                {item.label}
-              </Text>
-
-              {value === item.value && (
-                <I
-                  name="checkmark"
-                  color={P.green}
-                />
-              )}
-            </Pressable>
-          ))}
-
-          <Text style={s.modalFootnote}>
-            {saving
-              ? 'Saving your attendance...'
-              : 'Your selection will be saved to Riverside.'}
-          </Text>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
 function RoleRouter({ userId }: { userId: string }) {
   const { isAdmin, loading, error } = useAdminAccess(userId);
   const [view, setView] = useState<'admin' | 'player'>('admin');
@@ -757,13 +347,12 @@ function PlayerApp({ userId, onSwitchToAdmin }: { userId: string; onSwitchToAdmi
   // Hidden screens can finish their initial data requests in the background.
   const navigateToTab = (nextTab: Tab) => setTab(nextTab);
   const insets = useSafeAreaInsets();
-  const [pickerOpen, setPickerOpen] = useState(false);
 
   const home = useHomeData(userId);
   const headerName = home.profile?.display_name?.trim() ||
     home.profile?.full_name?.trim().split(' ')[0] || 'Player';
   const headerProps: Record<Tab, { title: string; subtitle: string; highlight: string }> = {
-    Home: { title: `Hi ${headerName}!`, highlight: `${headerName}!`, subtitle: home.session ? 'Ready for your next club session?' : 'Welcome to Riverside!' },
+    Home: { title: `Hi ${headerName}!`, highlight: `${headerName}!`, subtitle: home.session?.status === 'active' ? 'Club night is live · check your match below' : home.session ? 'Ready for your next club session?' : 'Welcome to Riverside!' },
     Matches: { title: 'Matches', highlight: 'ches', subtitle: 'Your matches and club sessions' },
     Stats: { title: 'Statistics', highlight: 'istics', subtitle: 'Your live performance and club insights' },
     Leaderboard: { title: 'Leaderboard', highlight: 'board', subtitle: 'See how all players are performing' },
@@ -773,7 +362,6 @@ function PlayerApp({ userId, onSwitchToAdmin }: { userId: string; onSwitchToAdmi
   const chooseAttendance = async (value: Attendance) => {
     try {
       await home.saveAttendance(value);
-      setPickerOpen(false);
     } catch (error) {
       Alert.alert(
         'Unable to save attendance',
@@ -809,7 +397,7 @@ function PlayerApp({ userId, onSwitchToAdmin }: { userId: string; onSwitchToAdmi
         <View style={{ flex: 1, display: tab === 'Home' ? 'flex' : 'none' }}>
           <Home
             home={home}
-            changeAttendance={() => setPickerOpen(true)}
+            changeAttendance={value => void chooseAttendance(value)}
             go={navigateToTab}
           />
         </View>
@@ -834,18 +422,6 @@ function PlayerApp({ userId, onSwitchToAdmin }: { userId: string; onSwitchToAdmi
         onTabChange={navigateToTab}
       />
 
-      <AttendancePicker
-        visible={pickerOpen}
-        value={home.attendance ?? 'not-going'}
-        choose={value => {
-          void chooseAttendance(value);
-        }}
-        close={() => {
-          if (!home.saving) setPickerOpen(false);
-        }}
-        sessionTitle={home.session?.title ?? 'Club Session'}
-        saving={home.saving}
-      />
     </SafeAreaView>
   );
 }
