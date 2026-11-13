@@ -1,4 +1,6 @@
 import AuthScreen from '@/components/auth-screen';
+import AdminHomePage from '@/components/admin-home-page';
+import { useAdminAccess } from '@/hooks/use-admin-access';
 import ClubBottomNav, {
   type ClubTab,
 } from '@/components/club-bottom-nav';
@@ -726,7 +728,29 @@ function AttendancePicker({
   );
 }
 
-function PlayerApp({ userId }: { userId: string }) {
+function RoleRouter({ userId }: { userId: string }) {
+  const { isAdmin, loading, error } = useAdminAccess(userId);
+  const [view, setView] = useState<'admin' | 'player'>('admin');
+  if (loading) {
+    return <View style={{ flex: 1, backgroundColor: '#031B16', alignItems: 'center', justifyContent: 'center' }}>
+      <ActivityIndicator size="large" color="#00D995" />
+    </View>;
+  }
+  if (error) {
+    return <View style={{ flex: 1, backgroundColor: '#031B16', padding: 28, justifyContent: 'center' }}>
+      <Text style={{ color: '#F6FBF8', fontSize: 18, fontWeight: '700' }}>Unable to verify account permissions</Text>
+      <Text style={{ color: '#A6B8B1', marginTop: 12 }}>{error}</Text>
+      <Pressable onPress={() => void supabase.auth.signOut()} style={{ marginTop: 24 }}>
+        <Text style={{ color: '#00D995' }}>Sign out</Text>
+      </Pressable>
+    </View>;
+  }
+  return isAdmin && view === 'admin'
+    ? <AdminHomePage userId={userId} onSwitchToPlayer={() => setView('player')} />
+    : <PlayerApp userId={userId} onSwitchToAdmin={isAdmin ? () => setView('admin') : undefined} />;
+}
+
+function PlayerApp({ userId, onSwitchToAdmin }: { userId: string; onSwitchToAdmin?: () => void }) {
   const { P, s } = useThemeStyles();
   const [tab, setTab] = useState<Tab>('Home');
   // Mount every main tab at login, keeping each mounted afterward.
@@ -799,6 +823,7 @@ function PlayerApp({ userId }: { userId: string }) {
             <LeaderboardPage />
         </View>
         <View style={{ flex: 1, display: tab === 'More' ? 'flex' : 'none' }}>
+            {onSwitchToAdmin && <Pressable onPress={onSwitchToAdmin} style={{ backgroundColor: '#005B42', padding: 14, margin: 12, borderRadius: 12, alignItems: 'center' }}><Text style={{ color: '#FFFFFF', fontWeight: '800' }}>⇄ Switch to Admin Mode</Text></Pressable>}
             <MorePage />
         </View>
 
@@ -1152,7 +1177,7 @@ export default function RiversideApp() {
 
   return (
     <AppThemeProvider userId={userId}>
-      <PlayerApp userId={userId} />
+      <RoleRouter userId={userId} />
     </AppThemeProvider>
   );
 }
