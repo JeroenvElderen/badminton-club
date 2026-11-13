@@ -1,12 +1,44 @@
 import { supabase } from '@/lib/supabase';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 type Night = { id: string; title: string | null; starts_at: string; ends_at: string; status: string | null };
 type Filter = 'Upcoming' | 'Past' | 'All';
 const C = { bg: '#031B16', panel: '#06251E', tile: '#092B24', border: '#145B49', green: '#00D995', white: '#F6FBF8', muted: '#A6B8B1' };
 const fmtTime = (date: string) => new Date(date).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+function formatCreateError(error: unknown) {
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object') {
+    const details = error as {
+      message?: unknown;
+      code?: unknown;
+      details?: unknown;
+      hint?: unknown;
+    };
+    const lines: string[] = [];
+    if (typeof details.message === 'string' && details.message.trim()) lines.push(details.message);
+    if (typeof details.code === 'string' && details.code.trim()) lines.push('Code: ' + details.code);
+    if (typeof details.details === 'string' && details.details.trim()) lines.push(details.details);
+    if (typeof details.hint === 'string' && details.hint.trim()) lines.push('Hint: ' + details.hint);
+    if (lines.length) return lines.join('\n');
+  }
+  return 'The request failed without a database error message. Check the connection and permissions.';
+}
 
 export default function AdminNightsPage() {
   const [filter, setFilter] = useState<Filter>('Upcoming');
@@ -18,6 +50,7 @@ export default function AdminNightsPage() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [title, setTitle] = useState('Club Night');
   const [day, setDay] = useState(''); // YYYY-MM-DD
   const [start, setStart] = useState('19:00');
@@ -65,31 +98,69 @@ export default function AdminNightsPage() {
     : new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()), [nights, filter, now]);
 
   const saveNight = async () => {
+    setFormError(null);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) {
-      Alert.alert('Check the date and time', 'Use YYYY-MM-DD for the date and HH:MM for the times.'); return;
+      const message = 'Use YYYY-MM-DD for the date and HH:MM for the times.';
+      setFormError(message);
+      Alert.alert('Check the date and time', message);
+      return;
     }
-    const startsAt = new Date(`${day}T${start}:00`);
-    const endsAt = new Date(`${day}T${end}:00`);
-    if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime()) || endsAt <= startsAt) {
-      Alert.alert('Invalid club night', 'The end time must be after the start time.'); return;
+
+    const [year, month, dateNumber] = day.split('-').map(Number);
+    const [startHour, startMinute] = start.split(':').map(Number);
+    const [endHour, endMinute] = end.split(':').map(Number);
+    const startsAt = new Date(year, month - 1, dateNumber, startHour, startMinute, 0, 0);
+    const endsAt = new Date(year, month - 1, dateNumber, endHour, endMinute, 0, 0);
+    const validLocalDateTime = (value: Date, hour: number, minute: number) =>
+      value.getFullYear() === year &&
+      value.getMonth() === month - 1 &&
+      value.getDate() === dateNumber &&
+      value.getHours() === hour &&
+      value.getMinutes() === minute;
+
+    if (
+      !validLocalDateTime(startsAt, startHour, startMinute) ||
+      !validLocalDateTime(endsAt, endHour, endMinute) ||
+      endsAt <= startsAt
+    ) {
+      const message = 'Enter a valid date and make sure the end time is after the start time.';
+      setFormError(message);
+      Alert.alert('Invalid club night', message);
+      return;
     }
-    if (!title.trim()) { Alert.alert('Title required', 'Enter a club night title.'); return; }
+
+    if (!title.trim()) {
+      const message = 'Enter a club night title.';
+      setFormError(message);
+      Alert.alert('Title required', message);
+      return;
+    }
+
     setSaving(true);
     try {
-      const { error: insertError } = await supabase.from('club_sessions').insert({ title: title.trim(), starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString() });
+      const { error: insertError } = await supabase.from('club_sessions').insert({
+        title: title.trim(),
+        starts_at: startsAt.toISOString(),
+        ends_at: endsAt.toISOString(),
+        status: 'scheduled',
+      });
       if (insertError) throw insertError;
       setCreating(false);
+      setFormError(null);
       await load();
       Alert.alert('Club night created', 'Your new club night is now listed.');
     } catch (e) {
-      Alert.alert('Unable to create club night', e instanceof Error ? e.message : 'Please try again.');
-    } finally { setSaving(false); }
+      console.error('Unable to create club night:', e);
+      setFormError(formatCreateError(e));
+    } finally {
+      setSaving(false);
+    }
   };
 
   return <View style={s.root}>
     <ScrollView style={{ flex: 1 }} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.green} onRefresh={() => { setRefreshing(true); void load(); }} />}>
-      <Pressable style={s.create} onPress={() => setCreating(true)}><Ionicons name="add" size={27} color={C.white} /><Text style={s.createText}>Create Club Night</Text></Pressable>
+      <Pressable style={s.create} onPress={() => { setFormError(null); setCreating(true); }}><Ionicons name="add" size={27} color={C.white} /><Text style={s.createText}>Create Club Night</Text></Pressable>
       <View style={s.filters}>{(['Upcoming', 'Past', 'All'] as Filter[]).map(f => <Pressable key={f} onPress={() => setFilter(f)} style={[s.filter, filter === f && s.selectedFilter]}><Text style={[s.filterText, filter === f && { fontWeight: '800' }]}>{f}</Text></Pressable>)}</View>
       {loading && <ActivityIndicator size="large" color={C.green} style={{ marginTop: 24 }} />}
       {!!error && <Pressable style={s.card} onPress={() => void load()}><Text style={s.error}>{error}</Text><Text style={s.muted}>Tap to retry</Text></Pressable>}
@@ -111,12 +182,101 @@ export default function AdminNightsPage() {
       })}
       <Pressable style={s.recurring} onPress={() => Alert.alert('Recurring Schedule', 'Recurring club-night rules will be added in the next step. No schedule has been changed.')}><Ionicons name="sync" size={35} color={C.green} /><View style={{ flex: 1 }}><Text style={s.cardTitle}>Recurring Schedule</Text><Text style={s.muted}>Set up repeating club nights</Text></View><Ionicons name="chevron-forward" size={22} color={C.white} /></Pressable>
     </ScrollView>
-    <Modal visible={creating} animationType="slide" transparent onRequestClose={() => setCreating(false)}><View style={s.modalShade}><View style={s.modalBody}><Text style={s.modalTitle}>Create Club Night</Text><Text style={s.muted}>Date and times are entered in your device's local timezone.</Text>
-      <Text style={s.inputLabel}>Title</Text><TextInput style={s.input} value={title} onChangeText={setTitle} placeholder="Club Night" placeholderTextColor={C.muted} />
-      <Text style={s.inputLabel}>Date (YYYY-MM-DD)</Text><TextInput style={s.input} value={day} onChangeText={setDay} placeholder="2026-10-22" placeholderTextColor={C.muted} autoCapitalize="none" />
-      <View style={{ flexDirection: 'row', gap: 12 }}><View style={{ flex: 1 }}><Text style={s.inputLabel}>Starts (HH:MM)</Text><TextInput style={s.input} value={start} onChangeText={setStart} placeholder="19:00" placeholderTextColor={C.muted} /></View><View style={{ flex: 1 }}><Text style={s.inputLabel}>Ends (HH:MM)</Text><TextInput style={s.input} value={end} onChangeText={setEnd} placeholder="22:00" placeholderTextColor={C.muted} /></View></View>
-      <View style={s.modalActions}><Pressable style={s.cancel} onPress={() => setCreating(false)} disabled={saving}><Text style={s.cancelText}>Cancel</Text></Pressable><Pressable style={s.confirm} onPress={() => void saveNight()} disabled={saving}><Text style={s.createText}>{saving ? 'Creating…' : 'Create Night'}</Text></Pressable></View>
-    </View></View></Modal>
+    <Modal
+      visible={creating}
+      animationType="slide"
+      transparent
+      onRequestClose={() => {
+        if (!saving) setCreating(false);
+      }}
+    >
+      <KeyboardAvoidingView
+        style={s.modalShade}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
+        <ScrollView
+          style={s.modalScroll}
+          contentContainerStyle={s.modalScrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={s.modalBody}>
+            <Text style={s.modalTitle}>Create Club Night</Text>
+            <Text style={s.muted}>Date and times are entered in your device's local timezone.</Text>
+
+            <Text style={s.inputLabel}>Title</Text>
+            <TextInput
+              style={s.input}
+              value={title}
+              onChangeText={value => { setTitle(value); setFormError(null); }}
+              placeholder="Club Night"
+              placeholderTextColor={C.muted}
+              returnKeyType="next"
+            />
+
+            <Text style={s.inputLabel}>Date (YYYY-MM-DD)</Text>
+            <TextInput
+              style={s.input}
+              value={day}
+              onChangeText={value => { setDay(value); setFormError(null); }}
+              placeholder="2026-10-22"
+              placeholderTextColor={C.muted}
+              autoCapitalize="none"
+              keyboardType="numbers-and-punctuation"
+              returnKeyType="next"
+            />
+
+            <View style={s.timeFields}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.inputLabel}>Starts (HH:MM)</Text>
+                <TextInput
+                  style={s.input}
+                  value={start}
+                  onChangeText={value => { setStart(value); setFormError(null); }}
+                  placeholder="19:00"
+                  placeholderTextColor={C.muted}
+                  keyboardType="numbers-and-punctuation"
+                  returnKeyType="next"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.inputLabel}>Ends (HH:MM)</Text>
+                <TextInput
+                  style={s.input}
+                  value={end}
+                  onChangeText={value => { setEnd(value); setFormError(null); }}
+                  placeholder="22:00"
+                  placeholderTextColor={C.muted}
+                  keyboardType="numbers-and-punctuation"
+                  returnKeyType="done"
+                />
+              </View>
+            </View>
+
+            {formError ? <Text style={s.formError}>{formError}</Text> : null}
+
+            <View style={s.modalActions}>
+              <Pressable
+                style={s.cancel}
+                onPress={() => setCreating(false)}
+                disabled={saving}
+              >
+                <Text style={s.cancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[s.confirm, saving && { opacity: 0.6 }]}
+                onPress={() => void saveNight()}
+                disabled={saving}
+              >
+                <Text style={s.createText}>{saving ? 'Creating…' : 'Create Night'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
   </View>;
 }
 
@@ -129,5 +289,10 @@ const s = StyleSheet.create({
   nightInfo: { flex: 1, gap: 10 }, infoLine: { flexDirection: 'row', alignItems: 'center', gap: 8 }, infoText: { color: C.white, fontSize: 12, flexShrink: 1 },
   cardRight: { alignItems: 'flex-end', justifyContent: 'space-between', alignSelf: 'stretch' }, statusPill: { backgroundColor: C.tile, paddingHorizontal: 9, paddingVertical: 9, borderRadius: 12 }, livePill: { backgroundColor: '#034A39' }, statusText: { color: C.white, fontSize: 10 },
   recurring: { borderWidth: 1, borderColor: C.border, backgroundColor: C.panel, borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 16 }, cardTitle: { color: C.white, fontWeight: '800', fontSize: 16 }, muted: { color: C.muted, fontSize: 12, lineHeight: 18 }, error: { color: '#FF9999', fontSize: 13 },
-  modalShade: { flex: 1, backgroundColor: '#000B', justifyContent: 'flex-end' }, modalBody: { backgroundColor: C.panel, padding: 22, borderTopLeftRadius: 24, borderTopRightRadius: 24, gap: 10 }, modalTitle: { color: C.white, fontSize: 24, fontWeight: '800' }, inputLabel: { color: C.white, fontSize: 13, fontWeight: '700', marginTop: 8 }, input: { backgroundColor: C.tile, color: C.white, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 12, fontSize: 16 }, modalActions: { flexDirection: 'row', gap: 12, marginTop: 16 }, cancel: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 15, alignItems: 'center' }, cancelText: { color: C.white, fontWeight: '700' }, confirm: { flex: 1, backgroundColor: '#00AC80', borderRadius: 12, padding: 15, alignItems: 'center' },
+  modalShade: { flex: 1, backgroundColor: '#000B', justifyContent: 'flex-end' },
+  modalScroll: { width: '100%', maxHeight: '92%' },
+  modalScrollContent: { flexGrow: 1, justifyContent: 'flex-end' },
+  modalBody: { backgroundColor: C.panel, padding: 22, paddingBottom: 28, borderTopLeftRadius: 24, borderTopRightRadius: 24, gap: 10 },
+  timeFields: { flexDirection: 'row', gap: 12 },
+  formError: { color: '#FF9999', fontSize: 12, lineHeight: 18 }, modalTitle: { color: C.white, fontSize: 24, fontWeight: '800' }, inputLabel: { color: C.white, fontSize: 13, fontWeight: '700', marginTop: 8 }, input: { backgroundColor: C.tile, color: C.white, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 12, fontSize: 16 }, modalActions: { flexDirection: 'row', gap: 12, marginTop: 16 }, cancel: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 15, alignItems: 'center' }, cancelText: { color: C.white, fontWeight: '700' }, confirm: { flex: 1, backgroundColor: '#00AC80', borderRadius: 12, padding: 15, alignItems: 'center' },
 });
